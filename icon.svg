@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="pwa-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5" />
+      <stop offset="50%" stop-color="#7C3AED" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <!-- Background container -->
+  <rect width="512" height="512" rx="112" fill="url(#pwa-grad)" />
+
+  <!-- Subtitle emblem badge -->
+  <g filter="url(#shadow)" transform="translate(96, 96)">
+    <!-- Main screen bezel -->
+    <rect width="320" height="320" rx="48" fill="#0F172A" stroke="#ffffff" stroke-opacity="0.15" stroke-width="6" />
+
+    <!-- Play icon badge -->
+    <circle cx="160" cy="130" r="44" fill="#4F46E5" />
+    <path d="M148 114L182 130L148 146V114Z" fill="#FFFFFF" />
+
+    <!-- Subtitle lines -->
+    <rect x="56" y="204" width="208" height="24" rx="12" fill="#F3F4F6" />
+    <rect x="96" y="244" width="128" height="20" rx="10" fill="#FACC15" />
+  </g>
+</svg>
