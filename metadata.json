@@ -1,0 +1,6 @@
+{
+  "name": "SubCraft AI - Video Subtitle Studio",
+  "description": "Automatic AI subtitle generation for 5-10 minute videos with multi-language translation, interactive timeline editor, customizable subtitle styling, SRT/VTT export, high-resolution video burning, and Google Cloud sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

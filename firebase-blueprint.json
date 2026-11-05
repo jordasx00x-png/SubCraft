@@ -1,0 +1,97 @@
+{
+  "entities": {
+    "Project": {
+      "title": "Project",
+      "description": "A video subtitling project containing cues, styling, and metadata",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The UID of the owning user"
+        },
+        "title": {
+          "type": "string",
+          "description": "The title of the project",
+          "maxLength": 150
+        },
+        "videoFileName": {
+          "type": "string",
+          "description": "Original file name of the video",
+          "maxLength": 200
+        },
+        "videoDuration": {
+          "type": "number",
+          "description": "Duration of the video in seconds"
+        },
+        "language": {
+          "type": "string",
+          "description": "Original language code of the video",
+          "maxLength": 50
+        },
+        "targetLanguage": {
+          "type": "string",
+          "description": "Target language code for subtitles",
+          "maxLength": 50
+        },
+        "subtitles": {
+          "type": "array",
+          "description": "List of subtitle cue objects"
+        },
+        "style": {
+          "type": "object",
+          "description": "Subtitle visual style configuration"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last update"
+        }
+      },
+      "required": ["userId", "title", "createdAt", "updatedAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile metadata",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "User email address",
+          "maxLength": 120
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of the user",
+          "maxLength": 100
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Avatar photo URL",
+          "maxLength": 350
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of user creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of user update"
+        }
+      },
+      "required": ["email", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User account document"
+    },
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/Project" },
+      "description": "User subtitle projects collection"
+    }
+  }
+}
