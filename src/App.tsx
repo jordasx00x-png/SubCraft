@@ -429,37 +429,65 @@ export default function App() {
   };
 
   const handleSelectSavedProject = async (proj: SubtitleProject) => {
-    setProjectId(proj.id);
-    setProjectTitle(proj.title);
-    if (proj.subtitles) setSubtitles(proj.subtitles);
-    if (proj.style) setStyle(proj.style);
-    if (proj.language) setLanguage(proj.language);
-    if (proj.targetLanguage) setTargetLanguage(proj.targetLanguage);
-    setVideoFileName(proj.videoFileName || SAMPLE_VIDEO_NAME);
+    try {
+      setProjectId(proj.id);
+      setProjectTitle(proj.title || 'Mi Proyecto de Video');
+      const loadedSubtitles = proj.subtitles || [];
+      setSubtitles(loadedSubtitles);
+      if (proj.style) setStyle(proj.style);
+      if (proj.language) setLanguage(proj.language);
+      if (proj.targetLanguage) setTargetLanguage(proj.targetLanguage);
+      setVideoFileName(proj.videoFileName || SAMPLE_VIDEO_NAME);
+      setSelectedCueId(loadedSubtitles.length > 0 ? loadedSubtitles[0].id : null);
+      setCurrentTime(0);
+      setIsPlaying(false);
 
-    // Revoke previous custom video object url if needed
-    if (videoUrl && videoUrl !== SAMPLE_VIDEO_URL) {
-      URL.revokeObjectURL(videoUrl);
-    }
+      // Save as active project in local storage
+      try {
+        localStorage.setItem('subcraft_current_project', JSON.stringify(proj));
+      } catch (err) {
+        console.warn(err);
+      }
 
-    // Load media file for selected project from IndexedDB
-    const media = await getMediaFile(proj.id);
-    if (media) {
-      const restoredUrl = URL.createObjectURL(media.blob);
-      setVideoUrl(restoredUrl);
-      setVideoFileName(media.fileName);
-      const restoredFile =
-        media.blob instanceof File
-          ? media.blob
-          : new File([media.blob], media.fileName, { type: media.fileType });
-      setVideoFile(restoredFile);
-    } else if (proj.videoFileName === SAMPLE_VIDEO_NAME || !proj.videoFileName) {
-      setVideoFile(null);
-      setVideoUrl(SAMPLE_VIDEO_URL);
-      setVideoFileName(SAMPLE_VIDEO_NAME);
-    } else {
-      setVideoFile(null);
-      setVideoUrl(null);
+      // Revoke previous custom video object url if needed
+      if (videoUrl && videoUrl !== SAMPLE_VIDEO_URL) {
+        URL.revokeObjectURL(videoUrl);
+      }
+
+      // Load media file for selected project from IndexedDB safely
+      try {
+        const media = await getMediaFile(proj.id);
+        if (media && media.blob) {
+          const restoredUrl = URL.createObjectURL(media.blob);
+          setVideoUrl(restoredUrl);
+          setVideoFileName(media.fileName);
+          const restoredFile =
+            media.blob instanceof File
+              ? media.blob
+              : new File([media.blob], media.fileName, { type: media.fileType });
+          setVideoFile(restoredFile);
+        } else if (proj.videoFileName === SAMPLE_VIDEO_NAME || !proj.videoFileName) {
+          setVideoFile(null);
+          setVideoUrl(SAMPLE_VIDEO_URL);
+          setVideoFileName(SAMPLE_VIDEO_NAME);
+        } else {
+          setVideoFile(null);
+          setVideoUrl(null);
+        }
+      } catch (mediaErr) {
+        console.warn('Media file restore warning:', mediaErr);
+        if (proj.videoFileName === SAMPLE_VIDEO_NAME || !proj.videoFileName) {
+          setVideoFile(null);
+          setVideoUrl(SAMPLE_VIDEO_URL);
+          setVideoFileName(SAMPLE_VIDEO_NAME);
+        }
+      }
+    } catch (err) {
+      console.warn('Error opening saved project:', err);
+    } finally {
+      // ALWAYS switch view to studio & close modal
+      setCurrentView('studio');
+      setShowProjectsModal(false);
     }
   };
 
@@ -471,21 +499,47 @@ export default function App() {
     setStyle(DEFAULT_STYLE);
     setCurrentTime(0);
     setIsPlaying(false);
+    setSelectedCueId(null);
+    setCurrentView('studio');
+    setShowProjectsModal(false);
   };
 
   if (currentView === 'landing') {
     return (
-      <LandingPage
-        user={user}
-        onEnterStudio={() => setCurrentView('studio')}
-        onUploadVideoDirect={(file) => {
-          handleSelectVideoFile(file);
-          setCurrentView('studio');
-        }}
-        darkMode={darkMode}
-        onToggleDarkMode={() => setDarkMode(!darkMode)}
-        onAdminLogin={handleAdminLogin}
-      />
+      <>
+        <LandingPage
+          user={user}
+          onEnterStudio={() => setCurrentView('studio')}
+          onUploadVideoDirect={(file) => {
+            handleSelectVideoFile(file);
+            setCurrentView('studio');
+          }}
+          darkMode={darkMode}
+          onToggleDarkMode={() => setDarkMode(!darkMode)}
+          onAdminLogin={handleAdminLogin}
+        />
+
+        {showProjectsModal && (
+          <ProjectsModal
+            currentProjectId={projectId}
+            user={user}
+            isAdmin={isAdmin}
+            onSelectProject={handleSelectSavedProject}
+            onNewProject={handleCreateNewProject}
+            onLoginClick={() => setShowAuthModal(true)}
+            onClose={() => setShowProjectsModal(false)}
+          />
+        )}
+
+        {showAuthModal && (
+          <AuthModal
+            user={user}
+            onClose={() => setShowAuthModal(false)}
+            onLogoutSuccess={() => setCurrentView('landing')}
+            onAdminLogin={handleAdminLogin}
+          />
+        )}
+      </>
     );
   }
 
