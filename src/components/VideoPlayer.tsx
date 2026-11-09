@@ -261,34 +261,57 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return {
       fontFamily: `"${style.fontFamily}", sans-serif`,
       fontSize: style.fullScreenSubtitle
-        ? `clamp(24px, 4.2vw, ${style.fontSize * 1.8}px)`
-        : `clamp(16px, 2.4vw, ${style.fontSize * 1.25}px)`,
+        ? `clamp(20px, 4cqw, ${style.fontSize * 1.5}px)`
+        : `clamp(14px, 3.2cqw, ${style.fontSize * 1.1}px)`,
       fontWeight: style.fontWeight,
       color: style.textColor,
       textTransform: style.textTransform,
       letterSpacing: `${style.letterSpacing}px`,
+      lineHeight: 1.25,
       WebkitTextStroke: webkitTextStroke,
       paintOrder: 'stroke fill',
       textShadow,
       backgroundColor,
       padding: style.hasBackground
-        ? `${style.backgroundPadding}px ${style.backgroundPadding * 1.5}px`
-        : '0px',
+        ? `${style.backgroundPadding}px ${style.backgroundPadding * 1.6}px`
+        : '2px 8px',
       borderRadius: `${style.backgroundRounded}px`,
       textAlign: style.textAlign,
+      boxSizing: 'border-box' as const,
+      display: 'inline-flex',
+      flexDirection: 'column' as const,
+      alignItems:
+        style.textAlign === 'left'
+          ? 'flex-start'
+          : style.textAlign === 'right'
+          ? 'flex-end'
+          : 'center',
+      justifyContent: 'center',
+      maxWidth: '92%',
+      width: 'fit-content',
+      wordBreak: 'break-word' as const,
+      whiteSpace: 'pre-wrap' as const,
     };
   }, [style]);
 
   // Position class for overlay
   const positionClass = useMemo(() => {
+    let vertical = 'bottom-10 inset-x-0 items-end';
     if (style.position === 'top') {
-      return 'top-8 inset-x-0 items-start';
+      vertical = 'top-6 inset-x-0 items-start';
+    } else if (style.position === 'middle' || style.fullScreenSubtitle) {
+      vertical = 'inset-0 items-center';
     }
-    if (style.position === 'middle' || style.fullScreenSubtitle) {
-      return 'inset-y-0 inset-x-0 items-center justify-center';
+
+    let horizontal = 'justify-center text-center px-6';
+    if (style.textAlign === 'left') {
+      horizontal = 'justify-start text-left pl-8 pr-4';
+    } else if (style.textAlign === 'right') {
+      horizontal = 'justify-end text-right pr-8 pl-4';
     }
-    return 'bottom-16 inset-x-0 items-end';
-  }, [style.position, style.fullScreenSubtitle]);
+
+    return `${vertical} ${horizontal}`;
+  }, [style.position, style.textAlign, style.fullScreenSubtitle]);
 
   // Aspect ratio container styles
   const aspectClass = useMemo(() => {
@@ -369,7 +392,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       <div
         ref={containerRef}
         onMouseMove={handleMouseMove}
-        className={`relative ${aspectClass} bg-neutral-950 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-center items-center group border border-neutral-200 dark:border-neutral-800 transition-all`}
+        className={`relative ${aspectClass} @container bg-neutral-950 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-center items-center group border border-neutral-200 dark:border-neutral-800 transition-all`}
       >
         {videoUrl ? (
           <>

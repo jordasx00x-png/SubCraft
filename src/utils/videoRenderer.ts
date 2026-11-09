@@ -120,7 +120,14 @@ export function drawSubtitleOnCanvas(
 
     const boxWidth = maxBoxWidth + padding * 3;
     const boxHeight = totalTextHeight + padding * 2;
-    const boxX = (canvasWidth - boxWidth) / 2;
+    
+    let boxX = (canvasWidth - boxWidth) / 2;
+    if (style.textAlign === 'left') {
+      boxX = canvasWidth * 0.08 - padding * 1.5;
+    } else if (style.textAlign === 'right') {
+      boxX = canvasWidth * 0.92 - boxWidth + padding * 1.5;
+    }
+
     const boxY = centerY - totalTextHeight / 2 - padding;
 
     ctx.save();

@@ -784,24 +784,114 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
 
           <div className="h-px bg-neutral-200 dark:bg-neutral-800" />
 
-          <div className="space-y-2.5">
-            <label className="text-xs font-extrabold text-neutral-800 dark:text-neutral-200 uppercase tracking-wider block">
-              Posición Vertical
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {(['top', 'middle', 'bottom'] as const).map((pos) => (
-                <button
-                  key={pos}
-                  onClick={() => updateStyle('position', pos)}
-                  className={`py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer capitalize ${
-                    style.position === pos
-                      ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 shadow-xs'
-                      : 'border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400'
-                  }`}
-                >
-                  {pos === 'top' ? 'Arriba' : pos === 'middle' ? 'Centro' : 'Abajo'}
-                </button>
-              ))}
+          {/* POSITION & ALIGNMENT CONTROLS */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-extrabold text-neutral-800 dark:text-neutral-200 uppercase tracking-wider block">
+                Ubicación del Texto en Pantalla
+              </label>
+              <span className="text-[10px] font-mono text-indigo-500 font-bold uppercase">
+                {style.position === 'top' ? 'Arriba' : style.position === 'middle' ? 'Centro' : 'Abajo'} - {style.textAlign === 'left' ? 'Izq' : style.textAlign === 'right' ? 'Der' : 'Centro'}
+              </span>
+            </div>
+
+            {/* Quick 9-Grid Position Selector Matrix */}
+            <div className="bg-neutral-50 dark:bg-neutral-900/80 p-2.5 rounded-2xl border border-neutral-200 dark:border-neutral-800">
+              <span className="text-[10px] font-bold text-neutral-500 block mb-2 text-center uppercase tracking-wider">
+                Matriz de Posicionamiento (9 Puntos)
+              </span>
+              <div className="grid grid-cols-3 gap-1.5 max-w-[240px] mx-auto">
+                {[
+                  { pos: 'top', align: 'left', label: '↖', title: 'Arriba Izquierda' },
+                  { pos: 'top', align: 'center', label: '↑', title: 'Arriba Centro' },
+                  { pos: 'top', align: 'right', label: '↗', title: 'Arriba Derecha' },
+                  { pos: 'middle', align: 'left', label: '←', title: 'Centro Izquierda' },
+                  { pos: 'middle', align: 'center', label: '•', title: 'Centro Absoluto' },
+                  { pos: 'middle', align: 'right', label: '→', title: 'Centro Derecha' },
+                  { pos: 'bottom', align: 'left', label: '↙', title: 'Abajo Izquierda' },
+                  { pos: 'bottom', align: 'center', label: '↓', title: 'Abajo Centro' },
+                  { pos: 'bottom', align: 'right', label: '↘', title: 'Abajo Derecha' },
+                ].map((item) => {
+                  const isSelected = style.position === item.pos && style.textAlign === item.align;
+                  return (
+                    <button
+                      key={`${item.pos}-${item.align}`}
+                      type="button"
+                      title={item.title}
+                      onClick={() => {
+                        onChangeStyle({
+                          ...style,
+                          preset: 'custom',
+                          position: item.pos as 'top' | 'middle' | 'bottom',
+                          textAlign: item.align as 'left' | 'center' | 'right',
+                        });
+                      }}
+                      className={`h-9 rounded-xl font-black text-xs transition-all flex items-center justify-center cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 scale-105 border-2 border-indigo-400'
+                          : 'bg-white dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-200/80 dark:border-neutral-700'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Vertical Position Buttons */}
+            <div>
+              <span className="text-[11px] font-semibold text-neutral-500 block mb-1.5">
+                Posición Vertical
+              </span>
+              <div className="grid grid-cols-3 gap-2">
+                {(['top', 'middle', 'bottom'] as const).map((pos) => (
+                  <button
+                    key={pos}
+                    type="button"
+                    onClick={() => updateStyle('position', pos)}
+                    className={`py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer capitalize ${
+                      style.position === pos
+                        ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 shadow-xs'
+                        : 'border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400'
+                    }`}
+                  >
+                    {pos === 'top' ? 'Arriba' : pos === 'middle' ? 'Centro' : 'Abajo'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Horizontal Alignment Buttons */}
+            <div>
+              <span className="text-[11px] font-semibold text-neutral-500 block mb-1.5">
+                Alineación Horizontal
+              </span>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'left', label: 'Izquierda', icon: AlignLeft },
+                  { id: 'center', label: 'Centro', icon: AlignCenter },
+                  { id: 'right', label: 'Derecha', icon: AlignRight },
+                ].map((align) => {
+                  const Icon = align.icon;
+                  const isSelected = style.textAlign === align.id;
+                  return (
+                    <button
+                      key={align.id}
+                      type="button"
+                      onClick={() => updateStyle('textAlign', align.id as 'left' | 'center' | 'right')}
+                      className={`py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                        isSelected
+                          ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 shadow-xs'
+                          : 'border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      <span>{align.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
