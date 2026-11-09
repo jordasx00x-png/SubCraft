@@ -19,6 +19,7 @@ import { generateAlgorithmicSubtitles } from '../utils/nonAiTranscriber';
 interface GenerateModalProps {
   currentVideoFile: File | null;
   currentVideoUrl: string | null;
+  videoDuration?: number;
   onSubtitlesGenerated: (subtitles: SubtitleCue[], detectedLanguage?: string) => void;
   onVideoSelected: (file: File) => void;
   onClose: () => void;
@@ -27,6 +28,7 @@ interface GenerateModalProps {
 export const GenerateModal: React.FC<GenerateModalProps> = ({
   currentVideoFile,
   currentVideoUrl,
+  videoDuration,
   onSubtitlesGenerated,
   onVideoSelected,
   onClose,
@@ -61,9 +63,10 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
     setProgressStage('Analizando archivo de video con memoria optimizada...');
 
     try {
-      let duration = 30;
+      let duration = videoDuration && videoDuration > 0 ? videoDuration : 60;
       if (currentVideoFile) {
-        duration = await getSafeVideoDuration(currentVideoFile);
+        const safeDur = await getSafeVideoDuration(currentVideoFile);
+        if (safeDur > 0) duration = safeDur;
       }
 
       let generatedCues: SubtitleCue[] = [];
@@ -213,47 +216,51 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
                 </button>
               </div>
 
-              {/* Groq API Key Quick Panel (in AI mode) */}
+              {/* AI Engine & Groq API Key Panel */}
               {generationMode === 'ai' && (
-                <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs space-y-1.5">
+                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 font-bold text-amber-500 dark:text-amber-400">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-600 dark:text-amber-400">
                       <Zap className="w-4 h-4 text-amber-500" />
-                      <span>Motor Whisper / Groq LPU</span>
+                      <span>Motor de IA: Groq Whisper LPU + Gemini 2.5</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowKeyInput(!showKeyInput)}
-                      className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
-                    >
-                      {groqKey ? 'Modificar Key' : '+ Añadir Groq Key'}
-                    </button>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold">
+                      {groqKey ? 'Groq Activo' : 'Gemini Activo'}
+                    </span>
                   </div>
 
-                  {showKeyInput ? (
-                    <div className="pt-1 flex gap-2">
+                  <div>
+                    <label className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300 block mb-1">
+                      API Key de Groq (para Whisper ultra-rápido en todos tus videos):
+                    </label>
+                    <div className="flex gap-2">
                       <input
                         type="password"
                         value={groqKey}
                         onChange={(e) => handleSaveGroqKey(e.target.value)}
-                        placeholder="gsk_xxxxxxxxxxxxxxxxxxxx"
-                        className="flex-1 px-2.5 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs font-mono text-neutral-900 dark:text-neutral-100 outline-none"
+                        placeholder="Pega aquí tu clave gsk_... de Groq"
+                        className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-neutral-900 border border-amber-400/40 dark:border-amber-500/30 text-xs font-mono text-neutral-900 dark:text-neutral-100 outline-none focus:ring-2 focus:ring-amber-500"
                       />
-                      <button
-                        type="button"
-                        onClick={() => setShowKeyInput(false)}
-                        className="px-2.5 py-1.5 bg-amber-500 text-neutral-950 font-bold text-xs rounded-lg cursor-pointer"
-                      >
-                        OK
-                      </button>
+                      {groqKey && (
+                        <button
+                          type="button"
+                          onClick={() => handleSaveGroqKey('')}
+                          className="px-2 py-1 text-[11px] text-red-500 hover:text-red-700 dark:hover:text-red-400 cursor-pointer font-bold"
+                          title="Eliminar clave"
+                        >
+                          Borrar
+                        </button>
+                      )}
                     </div>
-                  ) : groqKey ? (
-                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
-                      <Check className="w-3.5 h-3.5" /> Clave Groq vinculada (Transcripción ultrarrápida activa)
+                  </div>
+
+                  {groqKey ? (
+                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 font-semibold">
+                      <Check className="w-3.5 h-3.5" /> Clave de Groq guardada. Se transcribirán todos los subtítulos del video con Whisper.
                     </p>
                   ) : (
-                    <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-tight">
-                      Usa tu clave de Groq (<code className="text-amber-500">gsk_...</code>) para transcribir al instante con Whisper.
+                    <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
+                      💡 Si pegas tu API Key de Groq (<code className="text-amber-500 font-mono">gsk_...</code>), se usará Whisper LPU a máxima velocidad. Si no tienes una, el sistema usará automáticamente el motor Gemini 2.5 del servidor.
                     </p>
                   )}
                 </div>

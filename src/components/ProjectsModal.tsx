@@ -19,6 +19,7 @@ import { User } from 'firebase/auth';
 interface ProjectsModalProps {
   currentProjectId: string;
   user: User | null;
+  isAdmin?: boolean;
   onSelectProject: (project: SubtitleProject) => void;
   onNewProject: () => void;
   onLoginClick: () => void;
@@ -28,6 +29,7 @@ interface ProjectsModalProps {
 export const ProjectsModal: React.FC<ProjectsModalProps> = ({
   currentProjectId,
   user,
+  isAdmin,
   onSelectProject,
   onNewProject,
   onLoginClick,
@@ -52,7 +54,7 @@ export const ProjectsModal: React.FC<ProjectsModalProps> = ({
 
   useEffect(() => {
     loadProjects();
-  }, [user]);
+  }, [user, isAdmin]);
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
@@ -73,10 +75,14 @@ export const ProjectsModal: React.FC<ProjectsModalProps> = ({
             </div>
             <div>
               <h2 className="font-bold text-base text-neutral-900 dark:text-neutral-100">
-                Mis Proyectos en la Nube
+                Mis Proyectos de Subtítulos
               </h2>
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                {user ? `Sincronizados con ${user.email}` : 'Almacenamiento local (conéctate para nube)'}
+                {user
+                  ? `Sincronizados con ${user.email}`
+                  : isAdmin
+                  ? 'Sesión Administrador (jordasx00x@gmail.com) · Guardado Permanente Activo'
+                  : 'Almacenamiento permanente en tu navegador'}
               </p>
             </div>
           </div>

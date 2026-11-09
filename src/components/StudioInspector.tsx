@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Subtitles,
   Palette,
@@ -30,6 +30,9 @@ import {
   ListFilter,
   Edit3,
   User,
+  Zap,
+  Sparkles,
+  Key,
 } from 'lucide-react';
 import {
   SubtitleCue,
@@ -158,12 +161,46 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
 
   const [timeShiftOffset, setTimeShiftOffset] = useState<number>(0.5);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [groqKey, setGroqKey] = useState<string>(() => localStorage.getItem('subcraft_groq_api_key') || '');
 
-  const selectedCue =
-    subtitles.find((c) => c.id === selectedCueId) ||
-    subtitles.find((c) => currentTime >= c.start && currentTime <= c.end) ||
-    subtitles[0] ||
-    null;
+  const handleSaveGroqKey = (val: string) => {
+    setGroqKey(val);
+    localStorage.setItem('subcraft_groq_api_key', val.trim());
+    setSuccessMsg('API Key de Groq guardada correctamente');
+    setTimeout(() => setSuccessMsg(null), 3000);
+  };
+
+  // Active playing cue at currentTime
+  const activePlayingCue = subtitles.find(
+    (c) => currentTime >= c.start - 0.05 && currentTime <= c.end + 0.1
+  );
+
+  const selectedCue = useMemo(() => {
+    if (subtitles.length === 0) return null;
+
+    // 1. If playhead matches a cue, follow that active cue
+    if (activePlayingCue) return activePlayingCue;
+
+    // 2. If user selected a cue that is near currentTime (within 4 seconds)
+    if (selectedCueId) {
+      const explicit = subtitles.find((c) => c.id === selectedCueId);
+      if (explicit && Math.abs(currentTime - explicit.start) < 4.0) {
+        return explicit;
+      }
+    }
+
+    // 3. Find the closest cue to currentTime so in the middle of the video it selects the nearest cue
+    let closest = subtitles[0];
+    let minDiff = Infinity;
+    for (const cue of subtitles) {
+      const diff = Math.min(Math.abs(currentTime - cue.start), Math.abs(currentTime - cue.end));
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = cue;
+      }
+    }
+    return closest;
+  }, [subtitles, activePlayingCue, selectedCueId, currentTime]);
 
   const selectedIndex = selectedCue ? subtitles.findIndex((c) => c.id === selectedCue.id) : -1;
 
@@ -301,7 +338,7 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                   onClick={() => {
                     const prev = subtitles[selectedIndex - 1];
                     if (prev) {
-                      onSeek(prev.start);
+                      onSeek(prev.start + 0.05);
                       onSelectCue?.(prev.id);
                     }
                   }}
@@ -326,7 +363,7 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                   onClick={() => {
                     const next = subtitles[selectedIndex + 1];
                     if (next) {
-                      onSeek(next.start);
+                      onSeek(next.start + 0.05);
                       onSelectCue?.(next.id);
                     }
                   }}
@@ -400,7 +437,7 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                         -
                       </button>
                       <span
-                        onClick={() => onSeek(selectedCue.start)}
+                        onClick={() => onSeek(selectedCue.start + 0.05)}
                         className="text-[11px] font-mono font-bold text-neutral-800 dark:text-neutral-200 cursor-pointer hover:underline"
                       >
                         {formatTimeDisplay(selectedCue.start, true)}
@@ -425,7 +462,7 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                         -
                       </button>
                       <span
-                        onClick={() => onSeek(selectedCue.end)}
+                        onClick={() => onSeek(Math.max(selectedCue.start, selectedCue.end - 0.2))}
                         className="text-[11px] font-mono font-bold text-neutral-800 dark:text-neutral-200 cursor-pointer hover:underline"
                       >
                         {formatTimeDisplay(selectedCue.end, true)}
@@ -846,23 +883,62 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
       {/* TAB 4: TOOLS & ALGORITHMIC GENERATOR */}
       {activeTab === 'tools' && (
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {/* Algorithmic Generator Trigger */}
-          <div className="p-5 rounded-3xl border border-indigo-200 dark:border-indigo-800/60 bg-gradient-to-br from-indigo-600 to-violet-700 text-white shadow-xl">
+          {/* AI & Algorithmic Subtitle Generator Card */}
+          <div className="p-5 rounded-3xl border border-indigo-200 dark:border-indigo-800/60 bg-gradient-to-br from-indigo-600 via-violet-600 to-amber-500 text-white shadow-xl">
             <div className="flex items-center gap-3 mb-3">
               <div className="p-2.5 rounded-2xl bg-white/10 backdrop-blur-md">
-                <Cpu className="w-6 h-6 text-amber-300" />
+                <Sparkles className="w-6 h-6 text-amber-300" />
               </div>
               <div>
-                <h4 className="font-extrabold text-sm text-white">Generador Algorítmico Automático</h4>
-                <p className="text-xs text-indigo-100">Sincronización rítmica instantánea sin IA</p>
+                <h4 className="font-extrabold text-sm text-white">Subtítulos Automáticos con IA</h4>
+                <p className="text-xs text-indigo-100">Groq Whisper LPU + Gemini 2.5 para todo el video</p>
               </div>
             </div>
             <button
               onClick={onOpenGenerate}
               className="w-full py-3 px-4 text-xs font-extrabold rounded-2xl bg-white hover:bg-neutral-100 text-indigo-950 transition-all shadow-md active:scale-98 cursor-pointer flex items-center justify-center gap-2"
             >
-              <span>Ejecutar Generador Algorítmico</span>
+              <Sparkles className="w-4 h-4 text-amber-500" />
+              <span>Abrir Generador de Subtítulos IA</span>
             </button>
+          </div>
+
+          {/* Groq Whisper API Key Manager Card */}
+          <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-xs space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-bold text-amber-600 dark:text-amber-400">
+                <Zap className="w-4 h-4 text-amber-500" />
+                <span>API de Groq (Whisper AI)</span>
+              </div>
+              <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                groqKey ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-500'
+              }`}>
+                {groqKey ? 'Conectada' : 'No configurada'}
+              </span>
+            </div>
+
+            <p className="text-[11px] text-neutral-600 dark:text-neutral-400">
+              Guarda tu API Key de Groq (<code className="text-amber-500 font-mono">gsk_...</code>) para que todos los subtítulos automáticos se generen con Whisper LPU:
+            </p>
+
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={groqKey}
+                onChange={(e) => handleSaveGroqKey(e.target.value)}
+                placeholder="gsk_xxxxxxxxxxxxxxxxxxxx"
+                className="flex-1 px-3 py-1.5 rounded-xl bg-white dark:bg-neutral-900 border border-amber-400/40 dark:border-amber-500/30 text-xs font-mono text-neutral-900 dark:text-neutral-100 outline-none focus:ring-2 focus:ring-amber-500"
+              />
+              {groqKey && (
+                <button
+                  type="button"
+                  onClick={() => handleSaveGroqKey('')}
+                  className="px-2 py-1 text-[11px] text-red-500 hover:text-red-700 cursor-pointer font-bold"
+                >
+                  Borrar
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Time Shift Sincronizador */}

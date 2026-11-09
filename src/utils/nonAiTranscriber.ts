@@ -54,32 +54,64 @@ export async function generateAlgorithmicSubtitles(
     }
   }
 
-  if (lines.length === 0) {
-    lines = defaultSentences;
-  }
-
-  // Distribute lines across safeDuration evenly
-  const totalCues = lines.length;
-  const timePerCue = Math.max(2.0, Math.min(5.5, safeDuration / totalCues));
   const cues: SubtitleCue[] = [];
 
-  let currentTime = 0.5;
-  for (let i = 0; i < totalCues; i++) {
-    const text = lines[i];
-    const start = Math.round(currentTime * 100) / 100;
-    const end = Math.round(Math.min(safeDuration, start + timePerCue) * 100) / 100;
+  if (lines.length > 0 && transcriptText && transcriptText.trim().length > 0) {
+    // Distribute user-provided lines proportionally across the ENTIRE video duration
+    const totalCues = lines.length;
+    const interval = Math.max(2.5, (safeDuration - 1.0) / totalCues);
+    const activeSpan = Math.max(2.0, Math.min(interval * 0.88, 7.0));
 
-    if (start >= safeDuration - 0.2) break;
+    for (let i = 0; i < totalCues; i++) {
+      const start = Math.round((0.5 + i * interval) * 100) / 100;
+      const end = Math.round(Math.min(safeDuration, start + activeSpan) * 100) / 100;
+      if (start >= safeDuration - 0.2) break;
 
-    cues.push({
-      id: i + 1,
-      start,
-      end,
-      text,
-      speaker: 'Locutor',
-    });
+      cues.push({
+        id: i + 1,
+        start,
+        end,
+        text: lines[i],
+        speaker: 'Locutor',
+      });
+    }
+  } else {
+    // Fill the ENTIRE video duration with natural cues from start to end
+    const cueDuration = 4.5;
+    const pauseDuration = 0.5;
+    const step = cueDuration + pauseDuration;
+    let t = 0.5;
+    let cueIndex = 0;
 
-    currentTime = end + 0.2; // brief pause
+    const baseSentences = [
+      "En el cielo está su trono y en la tierra reinará.",
+      "Al que es justo y verdadero toda lengua confesará.",
+      "Coronado en majestad sobre todo Él está.",
+      "Digno es el cordero de Dios el que está en el trono.",
+      "Santo, santo, santo, digno de adorar.",
+      "El amado dejó su gloria y nuestros pasos caminó.",
+      "El calvario marcó la historia y con su sangre la reescribió.",
+      "Todo el honor, toda la majestad y todo el poder.",
+      "Declaramos que Jesucristo ha vencido para siempre.",
+      "Bienvenidos a la experiencia audiovisual interactiva.",
+      "Edita este subtítulo o ajusta sus tiempos con precisión milimétrica."
+    ];
+
+    while (t + 1.5 < safeDuration) {
+      const end = Math.round(Math.min(safeDuration, t + cueDuration) * 100) / 100;
+      const text = baseSentences[cueIndex % baseSentences.length];
+
+      cues.push({
+        id: cueIndex + 1,
+        start: Math.round(t * 100) / 100,
+        end,
+        text,
+        speaker: 'Locutor',
+      });
+
+      t = end + pauseDuration;
+      cueIndex++;
+    }
   }
 
   return cues;

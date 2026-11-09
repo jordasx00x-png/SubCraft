@@ -41,8 +41,12 @@ export async function transcribeWithGroq(
   apiKey: string,
   promptHint?: string
 ): Promise<SubtitleCue[]> {
+  const fileName =
+    audioBlobOrFile instanceof File
+      ? audioBlobOrFile.name
+      : 'audio.wav';
   const formData = new FormData();
-  formData.append('file', audioBlobOrFile, 'audio.wav');
+  formData.append('file', audioBlobOrFile, fileName);
   formData.append('model', 'whisper-large-v3-turbo');
   formData.append('response_format', 'verbose_json');
   formData.append('timestamp_granularities[]', 'segment');
@@ -118,7 +122,7 @@ export async function runSafeAITranscription(
   if (activeGroqKey.trim().length > 0 && videoFile) {
     onProgress?.(30, 'Enviando audio a Groq Whisper LPU...');
 
-    // If file is already small (< 24MB), stream directly
+    // If file is already an audio file or small video (< 24MB), stream directly
     if (videoFile.size < 24 * 1024 * 1024) {
       try {
         const groqCues = await transcribeWithGroq(videoFile, activeGroqKey, promptHint);
@@ -131,7 +135,7 @@ export async function runSafeAITranscription(
       }
     }
 
-    // If video is large, extract lightweight 16kHz mono WAV slice (< 10MB)
+    // Extract lightweight 16kHz mono WAV slice (< 20MB)
     try {
       onProgress?.(45, 'Extrayendo audio comprimido a 16kHz mono...');
       const audioBuffer = await extractAudioFromFile(videoFile);
@@ -147,14 +151,14 @@ export async function runSafeAITranscription(
     }
   }
 
-  // 2. Try Server-Side Gemini API (only if running with server proxy, using lightweight 16kHz audio, never raw video!)
-  if (videoFile && videoFile.size < 15 * 1024 * 1024) {
+  // 2. Try Server-Side Gemini API (using lightweight 16kHz audio, never raw video)
+  if (videoFile) {
     try {
-      onProgress?.(50, 'Conectando con motor de IA...');
+      onProgress?.(50, 'Conectando con motor de Inteligencia Artificial Gemini...');
       const audioBuffer = await extractAudioFromFile(videoFile);
       const { wavBase64 } = await convertAudioBufferTo16kHzWav(audioBuffer);
 
-      onProgress?.(75, 'Generando subtítulos con Gemini...');
+      onProgress?.(75, 'Generando subtítulos automáticos con Gemini 2.5...');
       const response = await fetch('/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -174,7 +178,7 @@ export async function runSafeAITranscription(
         }
       }
     } catch (apiErr) {
-      console.warn('Server Gemini API unreachable or in static mode:', apiErr);
+      console.warn('Server Gemini API unreachable or error:', apiErr);
     }
   }
 

@@ -10,13 +10,13 @@ import {
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { SubtitleProject } from '../types/subtitle';
-import { deleteMediaFile } from './mediaStore';
+import { deleteMediaFile, saveProjectRecord, getAllProjectRecords, deleteProjectRecord } from './mediaStore';
 
 const LOCAL_STORAGE_KEY = 'subcraft_current_project';
 const LOCAL_PROJECTS_KEY = 'subcraft_local_projects';
 
 /**
- * Save project to Firestore (if logged in) and update localStorage
+ * Save project to IndexedDB, LocalStorage, and Firestore (if authenticated)
  */
 export async function saveProject(project: SubtitleProject): Promise<void> {
   const updatedProject = {
@@ -24,10 +24,12 @@ export async function saveProject(project: SubtitleProject): Promise<void> {
     updatedAt: new Date().toISOString(),
   };
 
-  // Always keep offline copy
+  // 1. Persistent IndexedDB save (unlimited quota, works for Admin session & all users)
+  await saveProjectRecord(updatedProject);
+
+  // 2. Keep offline local storage copy
   try {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedProject));
-    // Also save in local list
     const localList = getLocalProjects();
     const existingIdx = localList.findIndex((p) => p.id === updatedProject.id);
     if (existingIdx >= 0) {
@@ -40,7 +42,7 @@ export async function saveProject(project: SubtitleProject): Promise<void> {
     console.warn('LocalStorage error:', err);
   }
 
-  // Cloud sync if authenticated
+  // 3. Cloud sync if authenticated in Firebase
   const currentUser = auth.currentUser;
   if (!currentUser) {
     return;
@@ -71,53 +73,57 @@ export async function saveProject(project: SubtitleProject): Promise<void> {
 }
 
 /**
- * Fetch all projects belonging to the current user
+ * Fetch all projects belonging to the current user or admin session
  */
 export async function fetchUserProjects(): Promise<SubtitleProject[]> {
+  const idbProjects = await getAllProjectRecords();
+  const localProjects = getLocalProjects();
+
+  const projectMap = new Map<string, SubtitleProject>();
+  localProjects.forEach((p) => projectMap.set(p.id, p));
+  idbProjects.forEach((p) => projectMap.set(p.id, p));
+
   const currentUser = auth.currentUser;
-  if (!currentUser) {
-    return getLocalProjects();
-  }
+  if (currentUser) {
+    const pathForQuery = 'projects';
+    try {
+      const q = query(collection(db, 'projects'), where('userId', '==', currentUser.uid));
+      const snapshot = await getDocs(q);
 
-  const pathForQuery = 'projects';
-  try {
-    const q = query(collection(db, 'projects'), where('userId', '==', currentUser.uid));
-    const snapshot = await getDocs(q);
-
-    const projects: SubtitleProject[] = [];
-    snapshot.forEach((d) => {
-      const data = d.data() as any;
-      projects.push({
-        id: d.id,
-        userId: data.userId,
-        title: data.title || 'Untitled Subtitle Project',
-        videoFileName: data.videoFileName,
-        videoDuration: data.videoDuration,
-        language: data.language || 'es',
-        targetLanguage: data.targetLanguage || 'es',
-        subtitles: data.subtitles || [],
-        style: data.style,
-        createdAt: data.createdAt || new Date().toISOString(),
-        updatedAt: data.updatedAt || new Date().toISOString(),
+      snapshot.forEach((d) => {
+        const data = d.data() as any;
+        projectMap.set(d.id, {
+          id: d.id,
+          userId: data.userId,
+          title: data.title || 'Untitled Subtitle Project',
+          videoFileName: data.videoFileName,
+          videoDuration: data.videoDuration,
+          language: data.language || 'es',
+          targetLanguage: data.targetLanguage || 'es',
+          subtitles: data.subtitles || [],
+          style: data.style,
+          createdAt: data.createdAt || new Date().toISOString(),
+          updatedAt: data.updatedAt || new Date().toISOString(),
+        });
       });
-    });
-
-    // Sort by updatedAt descending
-    projects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    return projects;
-  } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, pathForQuery);
-    return getLocalProjects();
+    } catch (error) {
+      console.warn('Firestore fetch warning:', error);
+    }
   }
+
+  const projects = Array.from(projectMap.values());
+  projects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  return projects;
 }
 
 /**
- * Delete project from Firestore and local storage
+ * Delete project from IndexedDB, Firestore, and local storage
  */
 export async function deleteProject(projectId: string): Promise<void> {
-  // Delete from local storage and IndexedDB
+  // Delete from IndexedDB and local storage
   try {
     await deleteMediaFile(projectId);
+    await deleteProjectRecord(projectId);
     const localList = getLocalProjects().filter((p) => p.id !== projectId);
     localStorage.setItem(LOCAL_PROJECTS_KEY, JSON.stringify(localList));
   } catch (err) {

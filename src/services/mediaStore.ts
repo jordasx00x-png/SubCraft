@@ -1,11 +1,15 @@
+import { SubtitleProject } from '../types/subtitle';
+
 /**
- * Persistent Media Storage Service using IndexedDB
- * Allows video and audio files to persist across browser reloads, session restarts, and project switches.
+ * Persistent Media & Projects Storage Service using IndexedDB
+ * Allows video and audio files and complete project data to persist across browser reloads,
+ * session restarts, admin sessions, and project switches without 5MB localStorage limits.
  */
 
 const DB_NAME = 'SubCraftMediaStoreDB';
 const STORE_NAME = 'mediaFiles';
-const DB_VERSION = 1;
+const PROJECTS_STORE = 'projects';
+const DB_VERSION = 2;
 
 interface StoredMediaRecord {
   projectId: string;
@@ -23,6 +27,9 @@ function openDB(): Promise<IDBDatabase> {
       const db = (event.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: 'projectId' });
+      }
+      if (!db.objectStoreNames.contains(PROJECTS_STORE)) {
+        db.createObjectStore(PROJECTS_STORE, { keyPath: 'id' });
       }
     };
 
@@ -111,5 +118,66 @@ export async function deleteMediaFile(projectId: string): Promise<void> {
     });
   } catch (err) {
     console.warn('Error deleting media file from IndexedDB:', err);
+  }
+}
+
+/**
+ * Save complete SubtitleProject to IndexedDB
+ */
+export async function saveProjectRecord(project: SubtitleProject): Promise<void> {
+  try {
+    const db = await openDB();
+    const transaction = db.transaction(PROJECTS_STORE, 'readwrite');
+    const store = transaction.objectStore(PROJECTS_STORE);
+
+    return new Promise((resolve, reject) => {
+      const request = store.put(project);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.warn('Error saving project to IndexedDB:', err);
+  }
+}
+
+/**
+ * Retrieve all projects saved in IndexedDB
+ */
+export async function getAllProjectRecords(): Promise<SubtitleProject[]> {
+  try {
+    const db = await openDB();
+    const transaction = db.transaction(PROJECTS_STORE, 'readonly');
+    const store = transaction.objectStore(PROJECTS_STORE);
+
+    return new Promise((resolve) => {
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const list = (request.result || []) as SubtitleProject[];
+        resolve(list);
+      };
+      request.onerror = () => resolve([]);
+    });
+  } catch (err) {
+    console.warn('Error reading projects from IndexedDB:', err);
+    return [];
+  }
+}
+
+/**
+ * Delete project from IndexedDB
+ */
+export async function deleteProjectRecord(projectId: string): Promise<void> {
+  try {
+    const db = await openDB();
+    const transaction = db.transaction(PROJECTS_STORE, 'readwrite');
+    const store = transaction.objectStore(PROJECTS_STORE);
+
+    return new Promise((resolve) => {
+      const request = store.delete(projectId);
+      request.onsuccess = () => resolve();
+      request.onerror = () => resolve();
+    });
+  } catch (err) {
+    console.warn('Error deleting project from IndexedDB:', err);
   }
 }

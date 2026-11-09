@@ -31,6 +31,7 @@ interface VideoPlayerProps {
   videoUrl: string | null;
   videoFileName?: string;
   subtitles: SubtitleCue[];
+  selectedCueId?: string | number | null;
   style: SubtitleStyle;
   currentTime: number;
   duration: number;
@@ -49,6 +50,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   videoUrl,
   videoFileName,
   subtitles,
+  selectedCueId,
   style,
   currentTime,
   duration,
@@ -141,15 +143,42 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (Math.abs(video.currentTime - currentTime) > 0.15) {
+    if (Math.abs(video.currentTime - currentTime) > 0.04) {
       video.currentTime = currentTime;
     }
   }, [currentTime]);
 
-  // Active cue for current timestamp
+  // Active cue strictly for the current playhead position
   const activeCue = useMemo(() => {
-    return subtitles.find((c) => currentTime >= c.start && currentTime <= c.end) || null;
-  }, [subtitles, currentTime]);
+    if (subtitles.length === 0) return null;
+
+    // 1. Direct match at currentTime (with 0.12s boundary grace period)
+    const matched = subtitles.find(
+      (c) => currentTime >= c.start - 0.12 && currentTime <= c.end + 0.12
+    );
+    if (matched) return matched;
+
+    // 2. If video is paused, only display a cue if currentTime is within 0.75s of it
+    if (!isPlaying) {
+      // If a cue is selected in the inspector and is within 1s of current time, show it
+      if (selectedCueId) {
+        const selected = subtitles.find((c) => c.id === selectedCueId);
+        if (selected && Math.abs(currentTime - selected.start) < 1.0) {
+          return selected;
+        }
+      }
+
+      // Check if paused within 0.75s of any cue
+      const nearCue = subtitles.find(
+        (c) => currentTime >= c.start - 0.75 && currentTime <= c.end + 0.75
+      );
+      if (nearCue) return nearCue;
+    }
+
+    // When seeking to a point where no subtitle exists (e.g. in the middle of the video),
+    // NEVER show cue #1! Return null so the screen is clean.
+    return null;
+  }, [subtitles, currentTime, isPlaying, selectedCueId]);
 
   // Loop current cue if enabled
   useEffect(() => {
@@ -360,6 +389,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               src={videoUrl}
               onClick={onPlayPauseToggle}
               onTimeUpdate={handleTimeUpdate}
+              onSeeked={handleTimeUpdate}
               onLoadedMetadata={handleLoadedMetadata}
               onEnded={() => onPlayPauseToggle()}
               className={`w-full h-full object-contain cursor-pointer ${

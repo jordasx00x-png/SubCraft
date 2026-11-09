@@ -169,9 +169,10 @@ export default function App() {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
 
     saveTimeoutRef.current = setTimeout(async () => {
+      const activeUserId = user ? user.uid : (isAdminSession ? 'admin_jordas' : 'anonymous');
       const projectPayload: SubtitleProject = {
         id: projectId,
-        userId: user ? user.uid : 'anonymous',
+        userId: activeUserId,
         title: projectTitle,
         videoFileName,
         videoDuration: duration,
@@ -188,22 +189,23 @@ export default function App() {
         if (videoFile) {
           await saveMediaFile(projectId, videoFile, videoFileName);
         }
-        setSaveStatus(user ? 'saved' : 'offline');
+        setSaveStatus(user || isAdminSession ? 'saved' : 'offline');
       } catch (err) {
         console.warn('Auto-save warning:', err);
-        setSaveStatus('offline');
+        setSaveStatus(isAdminSession ? 'saved' : 'offline');
       }
     }, 1200);
-  }, [projectId, projectTitle, videoFileName, videoFile, duration, language, targetLanguage, subtitles, style, user]);
+  }, [projectId, projectTitle, videoFileName, videoFile, duration, language, targetLanguage, subtitles, style, user, isAdminSession]);
 
   const [showSaveToast, setShowSaveToast] = useState<boolean>(false);
 
   // Manual save project function
   const handleManualSaveProject = async () => {
     setSaveStatus('saving');
+    const activeUserId = user ? user.uid : (isAdminSession ? 'admin_jordas' : 'anonymous');
     const projectPayload: SubtitleProject = {
       id: projectId,
-      userId: user ? user.uid : 'anonymous',
+      userId: activeUserId,
       title: projectTitle,
       videoFileName,
       videoDuration: duration,
@@ -220,12 +222,12 @@ export default function App() {
       if (videoFile) {
         await saveMediaFile(projectId, videoFile, videoFileName);
       }
-      setSaveStatus(user ? 'saved' : 'offline');
+      setSaveStatus(user || isAdminSession ? 'saved' : 'offline');
       setShowSaveToast(true);
       setTimeout(() => setShowSaveToast(false), 3500);
     } catch (err) {
       console.warn('Manual save warning:', err);
-      setSaveStatus('offline');
+      setSaveStatus(isAdminSession ? 'saved' : 'offline');
     }
   };
 
@@ -532,14 +534,27 @@ export default function App() {
               videoUrl={videoUrl}
               videoFileName={videoFileName}
               subtitles={subtitles}
+              selectedCueId={selectedCueId}
               style={style}
               currentTime={currentTime}
               duration={duration}
               isPlaying={isPlaying}
-              onTimeUpdate={setCurrentTime}
+              onTimeUpdate={(time) => {
+                setCurrentTime(time);
+                const active = subtitles.find((c) => time >= c.start && time <= c.end);
+                if (active) {
+                  setSelectedCueId(active.id);
+                }
+              }}
               onDurationChange={setDuration}
               onPlayPauseToggle={() => setIsPlaying(!isPlaying)}
-              onSeek={setCurrentTime}
+              onSeek={(time) => {
+                setCurrentTime(time);
+                const active = subtitles.find((c) => time >= c.start && time <= c.end);
+                if (active) {
+                  setSelectedCueId(active.id);
+                }
+              }}
               onUploadNewVideo={() => setShowAddVideoModal(true)}
               onLoadSampleVideo={handleLoadSampleVideo}
               onOpenBackgroundLoopModal={() => setActiveStudioTab('loops')}
@@ -597,7 +612,7 @@ export default function App() {
               setSelectedCueId(id);
               const cue = subtitles.find((c) => c.id === id);
               if (cue) {
-                setCurrentTime(cue.start);
+                setCurrentTime(Math.min(cue.end, cue.start + 0.05));
                 setIsPlaying(false);
               }
             }}
@@ -610,6 +625,7 @@ export default function App() {
         <GenerateModal
           currentVideoFile={videoFile}
           currentVideoUrl={videoUrl}
+          videoDuration={duration}
           onSubtitlesGenerated={(newCues, detectedLang) => {
             setSubtitles(newCues);
             if (detectedLang) setLanguage(detectedLang);
@@ -634,6 +650,7 @@ export default function App() {
         <ProjectsModal
           currentProjectId={projectId}
           user={user}
+          isAdmin={isAdmin}
           onSelectProject={handleSelectSavedProject}
           onNewProject={handleCreateNewProject}
           onLoginClick={() => setShowAuthModal(true)}

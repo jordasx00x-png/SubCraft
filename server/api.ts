@@ -86,7 +86,7 @@ Guidelines:
     const promptText = `Please transcribe this audio clip. ${languageInstruction} ${promptHint ? `Context hint: ${promptHint}` : ''}`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.5-flash',
       contents: [
         {
           inlineData: {
@@ -200,7 +200,7 @@ Return strictly valid JSON with the format:
 }`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
         systemInstruction: 'You are an expert audiovisual translator specializing in film and video subtitle localization. Retain exact timing and output valid JSON.',
@@ -287,7 +287,7 @@ Return strictly valid JSON:
 }`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
         systemInstruction: 'You are an expert video editor and copywriter specializing in video captions. Output strictly valid JSON.',
