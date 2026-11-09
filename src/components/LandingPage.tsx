@@ -261,9 +261,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </div>
 
               {error && (
-                <p className="text-xs text-red-400 mt-2 bg-red-950/40 p-2 rounded-lg border border-red-900/40">
-                  {error}
-                </p>
+                <div className="p-3.5 rounded-xl bg-red-950/60 border border-red-900/60 text-xs text-red-300 space-y-2 text-left">
+                  <p>{error}</p>
+                  <button
+                    onClick={onEnterStudio}
+                    className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <span>Entrar al Studio sin Iniciar Sesión</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               )}
             </div>
           )}

@@ -158,15 +158,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ user, onClose, onLogoutSuc
                     <span className="leading-relaxed">{errorMessage}</span>
                   </div>
                   <div className="bg-red-100 dark:bg-red-900/40 p-2 rounded-lg border border-red-300 dark:border-red-800 font-mono text-[11px] text-neutral-900 dark:text-neutral-100 flex items-center justify-between gap-2">
-                    <span>Dominio exacto: <strong>{window.location.hostname}</strong></span>
+                    <span>Dominio: <strong>{window.location.hostname}</strong></span>
                     <button
                       onClick={() => navigator.clipboard.writeText(window.location.hostname)}
                       className="px-2 py-0.5 bg-red-600 text-white rounded text-[10px] font-sans font-bold hover:bg-red-700 transition-colors cursor-pointer"
-                      title="Copiar dominio al portapapeles"
                     >
                       Copiar
                     </button>
                   </div>
+                  <button
+                    onClick={onClose}
+                    className="w-full py-1.5 px-3 bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer mt-1"
+                  >
+                    Usar App en Modo Local (Sin Sesión)
+                  </button>
                 </div>
               )}
 
