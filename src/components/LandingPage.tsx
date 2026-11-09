@@ -14,6 +14,7 @@ import {
   Layers,
   Clock,
   Loader2,
+  Crown,
 } from 'lucide-react';
 import { signInWithPopup, User } from 'firebase/auth';
 import { auth, googleProvider } from '../firebase';
@@ -27,6 +28,7 @@ interface LandingPageProps {
   onUploadVideoDirect: (file: File) => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
+  onAdminLogin?: () => void;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
@@ -35,6 +37,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onUploadVideoDirect,
   darkMode,
   onToggleDarkMode,
+  onAdminLogin,
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -204,16 +207,43 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </button>
             </div>
           ) : (
-            <div className="w-full space-y-4">
+            <div className="w-full space-y-3.5">
+              {/* Primary Direct Entry Button */}
+              <button
+                onClick={onEnterStudio}
+                className="w-full py-3.5 px-5 text-sm font-extrabold rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white shadow-lg shadow-indigo-600/30 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <span>🚀 Entrar al Studio de Subtítulos</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+
+              {/* Admin Master Login Button */}
+              {onAdminLogin && (
+                <button
+                  onClick={onAdminLogin}
+                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500/20 via-indigo-600/20 to-amber-500/20 hover:from-amber-500/30 hover:to-indigo-600/30 border border-amber-500/40 text-amber-300 font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                >
+                  <Crown className="w-4 h-4 text-amber-400" />
+                  <span>Acceso Administrador PRO (jordasx00x@gmail.com)</span>
+                </button>
+              )}
+
+              <div className="flex items-center gap-3 py-1">
+                <div className="h-px bg-neutral-800 flex-1" />
+                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">o con Google / Video</span>
+                <div className="h-px bg-neutral-800 flex-1" />
+              </div>
+
+              {/* Google Sign In */}
               <button
                 onClick={handleGoogleSignIn}
                 disabled={loading}
-                className="w-full py-3.5 px-5 rounded-2xl bg-white hover:bg-neutral-100 text-neutral-900 font-bold text-sm transition-all shadow-lg active:scale-98 flex items-center justify-center gap-3 cursor-pointer"
+                className="w-full py-3 px-4 rounded-2xl bg-white hover:bg-neutral-100 text-neutral-900 font-bold text-xs transition-all shadow-md active:scale-98 flex items-center justify-center gap-3 cursor-pointer"
               >
                 {loading ? (
                   <Loader2 className="w-4 h-4 animate-spin text-neutral-900" />
                 ) : (
-                  <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4" viewBox="0 0 24 24">
                     <path
                       fill="#4285F4"
                       d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.66v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.15z"

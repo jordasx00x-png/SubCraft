@@ -482,6 +482,7 @@ export default function App() {
         }}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
+        onAdminLogin={handleAdminLogin}
       />
     );
   }
