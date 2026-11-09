@@ -1,5 +1,5 @@
-import React from 'react';
-import { ShieldCheck, Crown, Database, CheckCircle2, Cpu, FileText, Download, X, HardDrive, Sparkles } from 'lucide-react';
+import React, { useState } from 'react';
+import { ShieldCheck, Crown, Database, CheckCircle2, Cpu, FileText, Download, X, HardDrive, Sparkles, Key } from 'lucide-react';
 import { SubtitleProject } from '../types/subtitle';
 import { getLocalProjects } from '../services/projectService';
 
@@ -15,6 +15,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   projectsCount,
 }) => {
   const localProjects = getLocalProjects();
+  const [groqApiKey, setGroqApiKey] = useState<string>(() => localStorage.getItem('subcraft_groq_api_key') || '');
+  const [groqSaved, setGroqSaved] = useState<boolean>(false);
+
+  const handleSaveGroqKey = () => {
+    localStorage.setItem('subcraft_groq_api_key', groqApiKey.trim());
+    setGroqSaved(true);
+    setTimeout(() => setGroqSaved(false), 3000);
+  };
 
   const handleExportSystemBackup = () => {
     const backupData = {
@@ -81,6 +89,39 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 <span className="text-[10px] text-neutral-500 uppercase font-semibold">Renderizado Video</span>
                 <p className="text-lg font-black text-emerald-400">1080p Ultra HD</p>
               </div>
+            </div>
+          </div>
+
+          {/* Groq API Key Configuration */}
+          <div className="p-4 rounded-2xl bg-neutral-950 border border-neutral-800 space-y-2 text-xs">
+            <div className="flex items-center justify-between">
+              <label className="font-bold text-amber-400 flex items-center gap-1.5">
+                <Key className="w-4 h-4 text-amber-400" />
+                <span>Clave API de Groq (Groq API Key)</span>
+              </label>
+              {groqSaved && (
+                <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> Guardada
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-neutral-400 leading-relaxed">
+              Ingresa tu clave de Groq (<code className="text-amber-300 bg-neutral-900 px-1 py-0.5 rounded">gsk_...</code>) para acelerar el procesamiento de audio e IA de subtítulos.
+            </p>
+            <div className="flex gap-2 pt-1">
+              <input
+                type="password"
+                value={groqApiKey}
+                onChange={(e) => setGroqApiKey(e.target.value)}
+                placeholder="gsk_xxxxxxxxxxxxxxxxxxxxxxxx"
+                className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-xs font-mono text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+              />
+              <button
+                onClick={handleSaveGroqKey}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 font-bold text-xs text-neutral-950 rounded-xl transition-colors cursor-pointer"
+              >
+                Guardar Key
+              </button>
             </div>
           </div>
 
