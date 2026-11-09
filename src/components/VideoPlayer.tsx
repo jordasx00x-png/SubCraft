@@ -78,7 +78,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isEditingOnScreen, setIsEditingOnScreen] = useState<boolean>(false);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Background Loop Canvas animation loop for Audio Mode
+  // Ultra-smooth 60 FPS Background Loop Canvas animation for Audio Mode
   useEffect(() => {
     if (!style.isAudioMode) return;
     const canvas = canvasRef.current;
@@ -87,30 +87,43 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (!ctx) return;
 
     let animId: number;
-    const render = () => {
+    let startTimestamp: number | null = null;
+    const baseTime = currentTime;
+
+    const render = (timestamp: number) => {
+      if (startTimestamp === null) startTimestamp = timestamp;
+
       const targetW = canvas.clientWidth || 1280;
       const targetH = canvas.clientHeight || 720;
       if (canvas.width !== targetW || canvas.height !== targetH) {
         canvas.width = targetW;
         canvas.height = targetH;
       }
+
+      // Smooth continuous time calculation for 60fps animations
+      const elapsedSec = isPlaying
+        ? baseTime + (timestamp - startTimestamp) / 1000
+        : currentTime;
+
       drawBackgroundLoop(
         ctx,
         canvas.width,
         canvas.height,
         style.backgroundLoop || 'aurora-gradient',
-        currentTime,
+        elapsedSec,
         {
           showVisualizer: style.showAudioVisualizer,
         }
       );
+
       if (isPlaying) {
         animId = requestAnimationFrame(render);
       }
     };
-    render();
+
+    animId = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animId);
-  }, [style.isAudioMode, style.backgroundLoop, style.showAudioVisualizer, currentTime, isPlaying]);
+  }, [style.isAudioMode, style.backgroundLoop, style.showAudioVisualizer, isPlaying]);
 
   // Sync internal video element with isPlaying state
   useEffect(() => {
@@ -258,11 +271,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       backgroundColor = `rgba(${r}, ${g}, ${b}, ${style.backgroundOpacity})`;
     }
 
+    const minSize = Math.max(12, Math.round(style.fontSize * 0.45));
+    const cqwVal = (style.fontSize / 7.2).toFixed(2);
+    const maxSize = Math.round(style.fontSize * 1.8);
+
+    const calculatedFontSize = style.fullScreenSubtitle
+      ? `clamp(20px, ${(style.fontSize / 5.0).toFixed(2)}cqw, ${style.fontSize * 2.2}px)`
+      : `clamp(${minSize}px, ${cqwVal}cqw, ${maxSize}px)`;
+
     return {
       fontFamily: `"${style.fontFamily}", sans-serif`,
-      fontSize: style.fullScreenSubtitle
-        ? `clamp(20px, 4cqw, ${style.fontSize * 1.5}px)`
-        : `clamp(14px, 3.2cqw, ${style.fontSize * 1.1}px)`,
+      fontSize: calculatedFontSize,
       fontWeight: style.fontWeight,
       color: style.textColor,
       textTransform: style.textTransform,
