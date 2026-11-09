@@ -152,9 +152,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ user, onClose, onLogoutSuc
               </div>
 
               {errorMessage && (
-                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 text-xs text-red-600 dark:text-red-400 flex items-center gap-2 text-left">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{errorMessage}</span>
+                <div className="p-3.5 rounded-xl bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900/50 text-xs text-red-600 dark:text-red-300 space-y-2 text-left">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span className="leading-relaxed">{errorMessage}</span>
+                  </div>
+                  <div className="bg-red-100 dark:bg-red-900/40 p-2 rounded-lg border border-red-300 dark:border-red-800 font-mono text-[11px] text-neutral-900 dark:text-neutral-100 flex items-center justify-between gap-2">
+                    <span>Dominio exacto: <strong>{window.location.hostname}</strong></span>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(window.location.hostname)}
+                      className="px-2 py-0.5 bg-red-600 text-white rounded text-[10px] font-sans font-bold hover:bg-red-700 transition-colors cursor-pointer"
+                      title="Copiar dominio al portapapeles"
+                    >
+                      Copiar
+                    </button>
+                  </div>
                 </div>
               )}
 
