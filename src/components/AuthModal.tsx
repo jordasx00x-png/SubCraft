@@ -24,7 +24,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ user, onClose, onLogoutSuc
     } catch (err: any) {
       console.error(err);
       if (err?.code !== 'auth/popup-closed-by-user') {
-        setErrorMessage(err?.message || 'Error al iniciar sesión con Google.');
+        if (err?.code === 'auth/unauthorized-domain' || err?.message?.includes('unauthorized-domain')) {
+          setErrorMessage(
+            `El dominio de tu web no está en la lista de Dominios Autorizados de Firebase. Añade "${window.location.hostname}" en Firebase Console > Authentication > Settings > Authorized domains.`
+          );
+        } else {
+          setErrorMessage(err?.message || 'Error al iniciar sesión con Google.');
+        }
       }
     } finally {
       setLoading(false);

@@ -49,7 +49,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       onEnterStudio();
     } catch (err: any) {
       if (err?.code !== 'auth/popup-closed-by-user') {
-        setError(err?.message || 'Error al conectar con Google.');
+        if (err?.code === 'auth/unauthorized-domain' || err?.message?.includes('unauthorized-domain')) {
+          setError(
+            `El dominio "${window.location.hostname}" no está autorizado en Firebase. Agrégalo en Firebase Console > Authentication > Settings > Authorized domains.`
+          );
+        } else {
+          setError(err?.message || 'Error al conectar con Google.');
+        }
       }
     } finally {
       setLoading(false);
