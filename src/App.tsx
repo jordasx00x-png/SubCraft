@@ -41,6 +41,7 @@ import { LandingPage } from './components/LandingPage';
 import { AddVideoModal } from './components/AddVideoModal';
 import { BackgroundLoopModal } from './components/BackgroundLoopModal';
 import { StyleEditor } from './components/StyleEditor';
+import { AdminModal } from './components/AdminModal';
 
 export default function App() {
   // Navigation view: 'landing' (login & presentation) or 'studio' (editor)
@@ -49,8 +50,12 @@ export default function App() {
   // Studio Inspector Tab: 'subtitles' | 'style' | 'loops' | 'ai'
   const [activeStudioTab, setActiveStudioTab] = useState<StudioTab>('subtitles');
 
-  // Authentication & Cloud Sync
+  // Authentication & Admin Access
   const [user, setUser] = useState<User | null>(null);
+  const [isAdminSession, setIsAdminSession] = useState<boolean>(() => {
+    return localStorage.getItem('subcraft_admin_session') === 'true';
+  });
+  const isAdmin = isAdminSession || user?.email === 'jordasx00x@gmail.com';
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'offline'>('saved');
 
   // Dark mode
@@ -87,6 +92,13 @@ export default function App() {
   const [showTimeShiftModal, setShowTimeShiftModal] = useState<boolean>(false);
   const [showStyleModal, setShowStyleModal] = useState<boolean>(false);
   const [showBackgroundLoopModal, setShowBackgroundLoopModal] = useState<boolean>(false);
+  const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
+
+  const handleAdminLogin = () => {
+    setIsAdminSession(true);
+    localStorage.setItem('subcraft_admin_session', 'true');
+    setCurrentView('studio');
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isFirstRender = useRef<boolean>(true);
@@ -493,6 +505,8 @@ export default function App() {
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
         user={user}
+        isAdmin={isAdmin}
+        onOpenAdmin={() => setShowAdminModal(true)}
         onLoginClick={() => setShowAuthModal(true)}
         onLogoutClick={handleLogout}
         onOpenProjects={() => setShowProjectsModal(true)}
@@ -631,6 +645,15 @@ export default function App() {
           user={user}
           onClose={() => setShowAuthModal(false)}
           onLogoutSuccess={() => setCurrentView('landing')}
+          onAdminLogin={handleAdminLogin}
+        />
+      )}
+
+      {showAdminModal && (
+        <AdminModal
+          adminEmail="jordasx00x@gmail.com"
+          projectsCount={subtitles.length > 0 ? 1 : 0}
+          onClose={() => setShowAdminModal(false)}
         />
       )}
 

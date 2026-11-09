@@ -2,15 +2,16 @@ import React, { useState } from 'react';
 import { User, signInWithPopup, signOut } from 'firebase/auth';
 import { auth, googleProvider } from '../firebase';
 import { syncUserProfile } from '../services/projectService';
-import { X, Cloud, Check, LogOut, Loader2, AlertCircle, ShieldCheck } from 'lucide-react';
+import { X, Cloud, Check, LogOut, Loader2, AlertCircle, ShieldCheck, Crown } from 'lucide-react';
 
 interface AuthModalProps {
   user: User | null;
   onClose: () => void;
   onLogoutSuccess?: () => void;
+  onAdminLogin?: () => void;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ user, onClose, onLogoutSuccess }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({ user, onClose, onLogoutSuccess, onAdminLogin }) => {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -205,6 +206,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ user, onClose, onLogoutSuc
                 )}
                 <span>Continuar con Google</span>
               </button>
+
+              {/* Admin Master Login Direct Button */}
+              {onAdminLogin && (
+                <button
+                  onClick={() => {
+                    onAdminLogin();
+                    onClose();
+                  }}
+                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500/20 via-indigo-600/20 to-amber-500/20 hover:from-amber-500/30 hover:to-indigo-600/30 border border-amber-500/40 text-amber-300 font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                >
+                  <Crown className="w-4 h-4 text-amber-400" />
+                  <span>Acceso Administrador PRO (jordasx00x@gmail.com)</span>
+                </button>
+              )}
             </div>
           )}
         </div>

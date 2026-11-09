@@ -16,6 +16,7 @@ import {
   Plus,
   Save,
   Cpu,
+  Crown,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -27,6 +28,8 @@ interface NavbarProps {
   darkMode: boolean;
   onToggleDarkMode: () => void;
   user: User | null;
+  isAdmin?: boolean;
+  onOpenAdmin?: () => void;
   onLoginClick: () => void;
   onLogoutClick: () => void;
   onOpenProjects: () => void;
@@ -48,6 +51,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   darkMode,
   onToggleDarkMode,
   user,
+  isAdmin,
+  onOpenAdmin,
   onLoginClick,
   onLogoutClick,
   onOpenProjects,
@@ -197,6 +202,18 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* PWA App Install Button */}
           <PWAInstallButton variant="navbar" />
+
+          {/* Admin Master Badge & Button */}
+          {isAdmin && (
+            <button
+              onClick={onOpenAdmin}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-black rounded-lg bg-gradient-to-r from-amber-500/20 via-indigo-600/20 to-amber-500/20 hover:from-amber-500/30 hover:to-indigo-600/30 text-amber-300 border border-amber-500/40 shadow-xs cursor-pointer animate-in fade-in"
+              title="Panel de Administrador (jordasx00x@gmail.com)"
+            >
+              <Crown className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden xl:inline">ADMIN PRO</span>
+            </button>
+          )}
 
           {/* Google Sign-in / User Avatar */}
           {user ? (
