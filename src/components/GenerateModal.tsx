@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Cpu,
   Sparkles,
@@ -8,12 +8,12 @@ import {
   AlertCircle,
   Loader2,
   X,
-  Clock,
-  Layers,
-  Wand2,
+  Key,
+  ShieldCheck,
+  Zap,
 } from 'lucide-react';
 import { SubtitleCue } from '../types/subtitle';
-import { extractAudioFromFile } from '../utils/audioExtractor';
+import { runSafeAITranscription, getSafeVideoDuration } from '../services/aiTranscription';
 import { generateAlgorithmicSubtitles } from '../utils/nonAiTranscriber';
 
 interface GenerateModalProps {
@@ -33,12 +33,19 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
 }) => {
   const [generationMode, setGenerationMode] = useState<'ai' | 'algorithmic'>('ai');
   const [customText, setCustomText] = useState<string>('');
+  const [groqKey, setGroqKey] = useState<string>(() => localStorage.getItem('subcraft_groq_api_key') || '');
+  const [showKeyInput, setShowKeyInput] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [progressStage, setProgressStage] = useState<string>('');
   const [progressPercent, setProgressPercent] = useState<number>(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSaveGroqKey = (val: string) => {
+    setGroqKey(val);
+    localStorage.setItem('subcraft_groq_api_key', val.trim());
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -50,73 +57,40 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
   const handleStartGeneration = async () => {
     setIsProcessing(true);
     setErrorMessage(null);
-    setProgressPercent(20);
-    setProgressStage('Analizando audio y voz del video...');
+    setProgressPercent(15);
+    setProgressStage('Analizando archivo de video con memoria optimizada...');
 
     try {
-      let totalDuration = 30;
-
+      let duration = 30;
       if (currentVideoFile) {
-        try {
-          const audioBuffer = await extractAudioFromFile(currentVideoFile, (p) => {
-            setProgressStage(p.message);
-            setProgressPercent(Math.round(p.percent * 0.5));
-          });
-          if (audioBuffer && audioBuffer.duration > 0) {
-            totalDuration = audioBuffer.duration;
-          }
-        } catch (e) {
-          console.warn('Audio extraction fallback to default duration:', e);
-        }
+        duration = await getSafeVideoDuration(currentVideoFile);
       }
 
       let generatedCues: SubtitleCue[] = [];
 
       if (generationMode === 'ai') {
-        setProgressStage('Procesando transcripción inteligente con IA...');
-        setProgressPercent(75);
+        setProgressStage('Procesando transcripción con Inteligencia Artificial...');
+        setProgressPercent(40);
 
-        try {
-          // Attempt server-side AI transcription API if video file is present
-          if (currentVideoFile) {
-            const reader = new FileReader();
-            const base64Promise = new Promise<string>((resolve, reject) => {
-              reader.onload = () => resolve(reader.result as string);
-              reader.onerror = (error) => reject(error);
-              reader.readAsDataURL(currentVideoFile);
-            });
-
-            const base64Data = await base64Promise;
-            const response = await fetch('/api/transcribe', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                audioBase64: base64Data,
-                mimeType: currentVideoFile.type || 'video/mp4',
-                promptHint: customText,
-              }),
-            });
-
-            if (response.ok) {
-              const resJson = await response.json();
-              if (resJson.success && resJson.data?.subtitles) {
-                generatedCues = resJson.data.subtitles;
-              }
-            }
-          }
-        } catch (aiErr) {
-          console.warn('AI transcription fallback to algorithmic synthesis:', aiErr);
-        }
-
-        // Fallback to algorithmic synthesis if AI returned empty or in client-side preview
-        if (generatedCues.length === 0) {
-          generatedCues = await generateAlgorithmicSubtitles(totalDuration, customText);
-        }
+        generatedCues = await runSafeAITranscription({
+          videoFile: currentVideoFile,
+          videoDuration: duration,
+          promptHint: customText,
+          groqApiKey: groqKey,
+          onProgress: (pct, stage) => {
+            setProgressPercent(pct);
+            setProgressStage(stage);
+          },
+        });
       } else {
-        setProgressStage('Generando bloques rítmicos algorítmicos...');
+        setProgressStage('Generando bloques rítmicos algorítmicos instantáneos...');
         setProgressPercent(80);
-        await new Promise((r) => setTimeout(r, 400));
-        generatedCues = await generateAlgorithmicSubtitles(totalDuration, customText);
+        await new Promise((r) => setTimeout(r, 300));
+        generatedCues = await generateAlgorithmicSubtitles(duration, customText);
+      }
+
+      if (!generatedCues || generatedCues.length === 0) {
+        generatedCues = await generateAlgorithmicSubtitles(duration, customText);
       }
 
       const normalizedCues: SubtitleCue[] = generatedCues
@@ -129,16 +103,23 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
         }));
 
       setProgressPercent(100);
-      setProgressStage('¡Subtítulos generados con éxito!');
+      setProgressStage('¡Subtítulos sincronizados con éxito!');
 
       setTimeout(() => {
         onSubtitlesGenerated(normalizedCues, 'es');
         onClose();
-      }, 400);
+      }, 350);
     } catch (err: any) {
-      console.error(err);
-      setErrorMessage(err?.message || 'Error al generar subtítulos.');
-      setIsProcessing(false);
+      console.error('Error generating subtitles:', err);
+      // Even if AI completely fails, fall back to algorithmic generator to protect user experience
+      try {
+        const fallbackCues = await generateAlgorithmicSubtitles(30, customText);
+        onSubtitlesGenerated(fallbackCues, 'es');
+        onClose();
+      } catch {
+        setErrorMessage(err?.message || 'Error al procesar subtítulos.');
+        setIsProcessing(false);
+      }
     }
   };
 
@@ -152,11 +133,16 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="font-extrabold text-base text-neutral-900 dark:text-neutral-100">
-                Generador de Subtítulos con IA
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="font-extrabold text-base text-neutral-900 dark:text-neutral-100">
+                  Generador de Subtítulos con IA
+                </h2>
+                <span className="text-[10px] font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                  ♾️ Intentos Ilimitados
+                </span>
+              </div>
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                Transcripción por Inteligencia Artificial y sincronización rítmica
+                Memoria optimizada · Soporta Groq Whisper y motor algorítmico
               </p>
             </div>
           </div>
@@ -171,7 +157,7 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-5">
+        <div className="p-6 space-y-4">
           {isProcessing ? (
             <div className="py-8 text-center space-y-4">
               <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
@@ -184,7 +170,7 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
                   {progressStage}
                 </h3>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                  Analizando el habla, distribuyendo marcas de tiempo exactas
+                  Protección de memoria activa · Procesamiento fluido
                 </p>
               </div>
 
@@ -199,11 +185,11 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
           ) : (
             <>
               {/* Generation Mode Selector */}
-              <div className="grid grid-cols-2 gap-2.5 p-1 bg-neutral-100 dark:bg-neutral-800/80 rounded-2xl">
+              <div className="grid grid-cols-2 gap-2 p-1 bg-neutral-100 dark:bg-neutral-800/80 rounded-2xl">
                 <button
                   type="button"
                   onClick={() => setGenerationMode('ai')}
-                  className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
                     generationMode === 'ai'
                       ? 'bg-indigo-600 text-white shadow-md'
                       : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
@@ -216,7 +202,7 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setGenerationMode('algorithmic')}
-                  className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
                     generationMode === 'algorithmic'
                       ? 'bg-indigo-600 text-white shadow-md'
                       : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
@@ -227,11 +213,57 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
                 </button>
               </div>
 
+              {/* Groq API Key Quick Panel (in AI mode) */}
+              {generationMode === 'ai' && (
+                <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-500 dark:text-amber-400">
+                      <Zap className="w-4 h-4 text-amber-500" />
+                      <span>Motor Whisper / Groq LPU</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowKeyInput(!showKeyInput)}
+                      className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
+                    >
+                      {groqKey ? 'Modificar Key' : '+ Añadir Groq Key'}
+                    </button>
+                  </div>
+
+                  {showKeyInput ? (
+                    <div className="pt-1 flex gap-2">
+                      <input
+                        type="password"
+                        value={groqKey}
+                        onChange={(e) => handleSaveGroqKey(e.target.value)}
+                        placeholder="gsk_xxxxxxxxxxxxxxxxxxxx"
+                        className="flex-1 px-2.5 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs font-mono text-neutral-900 dark:text-neutral-100 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowKeyInput(false)}
+                        className="px-2.5 py-1.5 bg-amber-500 text-neutral-950 font-bold text-xs rounded-lg cursor-pointer"
+                      >
+                        OK
+                      </button>
+                    </div>
+                  ) : groqKey ? (
+                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
+                      <Check className="w-3.5 h-3.5" /> Clave Groq vinculada (Transcripción ultrarrápida activa)
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-tight">
+                      Usa tu clave de Groq (<code className="text-amber-500">gsk_...</code>) para transcribir al instante con Whisper.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Media status card */}
-              <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-3">
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-500 shrink-0">
-                    <Video className="w-5 h-5" />
+                    <Video className="w-4 h-4" />
                   </div>
                   <div className="min-w-0">
                     <span className="text-xs font-bold text-neutral-900 dark:text-neutral-100 block truncate">
@@ -239,14 +271,14 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
                     </span>
                     <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
                       {generationMode === 'ai'
-                        ? 'Listo para transcripción por Inteligencia Artificial'
+                        ? 'Listo para transcripción por IA segura'
                         : 'Listo para división rítmica instantánea'}
                     </span>
                   </div>
                 </div>
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer shrink-0"
+                  className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer shrink-0"
                 >
                   Cambiar
                 </button>
@@ -261,15 +293,15 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
 
               {/* Custom script / text hints */}
               <div>
-                <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wider block mb-1.5">
-                  Guión o pista de texto (Opcional)
+                <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wider block mb-1">
+                  Guión o pista de letra (Opcional)
                 </label>
                 <textarea
-                  rows={3}
+                  rows={2}
                   value={customText}
                   onChange={(e) => setCustomText(e.target.value)}
-                  placeholder="Pega aquí la letra o guión. La IA detectará las frases y las sincronizará con el video..."
-                  className="w-full p-3 text-xs rounded-2xl bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 outline-none focus:ring-2 focus:ring-indigo-500 resize-none leading-relaxed"
+                  placeholder="Pega aquí la letra o guión opcional si quieres sincronizar frases específicas..."
+                  className="w-full p-2.5 text-xs rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 outline-none focus:ring-2 focus:ring-indigo-500 resize-none leading-relaxed"
                 />
               </div>
 
@@ -288,7 +320,7 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
                 <Sparkles className="w-4 h-4 text-amber-200" />
                 <span>
                   {generationMode === 'ai'
-                    ? 'Generar Subtítulos con IA'
+                    ? 'Generar Subtítulos con IA (Seguro)'
                     : 'Generar Subtítulos Algorítmicos'}
                 </span>
               </button>
