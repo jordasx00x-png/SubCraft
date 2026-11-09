@@ -1,3 +1,4 @@
+# SubCraft AI Studio - Automated GitHub Pages Deployment Workflow
 name: Deploy SubCraft AI Studio to GitHub Pages
 
 on:

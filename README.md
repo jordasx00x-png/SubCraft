@@ -1,5 +1,8 @@
 # 🎬 SubCraft AI Studio Pro
 
+[![Deploy to GitHub Pages](https://github.com/peaceiris/actions-gh-pages/workflows/Deploy%20to%20GitHub%20Pages/badge.svg)](https://github.com/peaceiris/actions-gh-pages)
+[![PWA Ready](https://img.shields.io/badge/PWA-Ready-indigo.svg)](https://vite-pwa-org.netlify.app/)
+
 Un estudio web profesional para la **creación, edición sincronizada y exportación de subtítulos** para videos de 5 a 10 minutos (MP4, WebM, MOV o enlaces directos de YouTube).
 
 ![SubCraft AI Studio](public/assets/aistudio/image_c6736215.png)
