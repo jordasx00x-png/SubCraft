@@ -178,16 +178,16 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
   const selectedCue = useMemo(() => {
     if (subtitles.length === 0) return null;
 
-    // 1. If playhead matches a cue, follow that active cue
-    if (activePlayingCue) return activePlayingCue;
-
-    // 2. If user selected a cue that is near currentTime (within 4 seconds)
-    if (selectedCueId) {
-      const explicit = subtitles.find((c) => c.id === selectedCueId);
-      if (explicit && Math.abs(currentTime - explicit.start) < 4.0) {
+    // 1. If user explicitly selected a cue (by ID), respect their explicit selection!
+    if (selectedCueId !== null && selectedCueId !== undefined) {
+      const explicit = subtitles.find((c) => String(c.id) === String(selectedCueId));
+      if (explicit) {
         return explicit;
       }
     }
+
+    // 2. If playhead matches an active cue, follow that active cue
+    if (activePlayingCue) return activePlayingCue;
 
     // 3. Find the closest cue to currentTime so in the middle of the video it selects the nearest cue
     let closest = subtitles[0];
@@ -200,9 +200,12 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
       }
     }
     return closest;
-  }, [subtitles, activePlayingCue, selectedCueId, currentTime]);
+  }, [subtitles, selectedCueId, activePlayingCue, currentTime]);
 
-  const selectedIndex = selectedCue ? subtitles.findIndex((c) => c.id === selectedCue.id) : -1;
+  const selectedIndex = useMemo(() => {
+    if (!selectedCue) return -1;
+    return subtitles.findIndex((c) => String(c.id) === String(selectedCue.id));
+  }, [subtitles, selectedCue]);
 
   const handleTimeStep = (cue: SubtitleCue, field: 'start' | 'end', delta: number) => {
     const nextVal = Math.max(0, Math.round((cue[field] + delta) * 100) / 100);
@@ -338,8 +341,8 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                   onClick={() => {
                     const prev = subtitles[selectedIndex - 1];
                     if (prev) {
-                      onSeek(prev.start + 0.05);
                       onSelectCue?.(prev.id);
+                      onSeek(prev.start);
                     }
                   }}
                   className="px-2 py-1 rounded-xl bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 disabled:opacity-30 cursor-pointer flex items-center gap-1 text-[11px] font-bold text-neutral-700 dark:text-neutral-200 transition-colors"
@@ -363,8 +366,8 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                   onClick={() => {
                     const next = subtitles[selectedIndex + 1];
                     if (next) {
-                      onSeek(next.start + 0.05);
                       onSelectCue?.(next.id);
+                      onSeek(next.start);
                     }
                   }}
                   className="px-2 py-1 rounded-xl bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 disabled:opacity-30 cursor-pointer flex items-center gap-1 text-[11px] font-bold text-neutral-700 dark:text-neutral-200 transition-colors"
@@ -688,17 +691,38 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
 
             <div>
               <div className="flex justify-between text-[11px] font-semibold text-neutral-500 mb-1">
-                <span>Tamaño</span>
-                <span className="font-mono text-neutral-800 dark:text-neutral-200">{style.fontSize}px</span>
+                <span>Tamaño de Letra</span>
+                <span className="font-mono text-indigo-600 dark:text-indigo-400 font-bold">{style.fontSize}px</span>
               </div>
               <input
                 type="range"
-                min={16}
-                max={44}
+                min={14}
+                max={76}
                 value={style.fontSize}
                 onChange={(e) => updateStyle('fontSize', parseInt(e.target.value))}
                 className="w-full accent-indigo-600 cursor-pointer"
               />
+              <div className="flex items-center justify-between gap-1 mt-1.5">
+                {[
+                  { label: 'Normal (22px)', val: 22 },
+                  { label: 'Medio (30px)', val: 30 },
+                  { label: 'Grande (40px)', val: 40 },
+                  { label: 'Gigante (56px)', val: 56 },
+                ].map((s) => (
+                  <button
+                    key={s.val}
+                    type="button"
+                    onClick={() => updateStyle('fontSize', s.val)}
+                    className={`px-1.5 py-0.5 text-[9px] rounded-md font-medium transition-colors cursor-pointer ${
+                      style.fontSize === s.val
+                        ? 'bg-indigo-600 text-white font-bold'
+                        : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div>

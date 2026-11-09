@@ -541,9 +541,11 @@ export default function App() {
               isPlaying={isPlaying}
               onTimeUpdate={(time) => {
                 setCurrentTime(time);
-                const active = subtitles.find((c) => time >= c.start && time <= c.end);
-                if (active) {
-                  setSelectedCueId(active.id);
+                if (isPlaying) {
+                  const active = subtitles.find((c) => time >= c.start && time <= c.end);
+                  if (active) {
+                    setSelectedCueId(active.id);
+                  }
                 }
               }}
               onDurationChange={setDuration}
@@ -579,7 +581,13 @@ export default function App() {
               onAddCue={handleAddCue}
               onMergeWithNext={handleMergeWithNext}
               onSplitCue={handleSplitCue}
-              onSeek={setCurrentTime}
+              onSeek={(time) => {
+                setCurrentTime(time);
+                const active = subtitles.find((c) => time >= c.start && time <= c.end);
+                if (active) {
+                  setSelectedCueId(active.id);
+                }
+              }}
               onPlaySpan={handlePlaySpan}
               onImportSrt={handleImportSrt}
               onOpenGenerate={() => setShowGenerateModal(true)}
@@ -595,6 +603,7 @@ export default function App() {
             subtitles={subtitles}
             duration={duration}
             currentTime={currentTime}
+            selectedCueId={selectedCueId}
             onSeek={setCurrentTime}
             onPause={() => setIsPlaying(false)}
             onUpdateCue={handleUpdateCue}
@@ -610,9 +619,9 @@ export default function App() {
             }}
             onSelectCue={(id) => {
               setSelectedCueId(id);
-              const cue = subtitles.find((c) => c.id === id);
+              const cue = subtitles.find((c) => String(c.id) === String(id));
               if (cue) {
-                setCurrentTime(Math.min(cue.end, cue.start + 0.05));
+                setCurrentTime(cue.start);
                 setIsPlaying(false);
               }
             }}

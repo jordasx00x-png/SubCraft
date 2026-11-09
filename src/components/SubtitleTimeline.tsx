@@ -15,6 +15,7 @@ interface SubtitleTimelineProps {
   subtitles: SubtitleCue[];
   duration: number;
   currentTime: number;
+  selectedCueId?: string | number | null;
   onSeek: (time: number) => void;
   onAddCueAtTime: (time: number) => void;
   onSelectCue: (cueId: string | number) => void;
@@ -26,6 +27,7 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   subtitles,
   duration,
   currentTime,
+  selectedCueId,
   onSeek,
   onAddCueAtTime,
   onSelectCue,
@@ -273,7 +275,9 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
                 100 - leftPct,
                 Math.max(0.6, ((cue.end - cue.start) / safeDuration) * 100)
               );
-              const isActive = currentTime >= cue.start && currentTime <= cue.end;
+              const isSelected = selectedCueId !== null && selectedCueId !== undefined && String(cue.id) === String(selectedCueId);
+              const isAtPlayhead = currentTime >= cue.start && currentTime <= cue.end;
+              const isActive = isSelected || isAtPlayhead;
 
               return (
                 <div

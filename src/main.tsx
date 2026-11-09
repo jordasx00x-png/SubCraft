@@ -3,6 +3,15 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
+// Unregister any stale development service workers that could cause memory exhaustion or stale code caches
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    for (const reg of registrations) {
+      reg.unregister().catch(() => {});
+    }
+  }).catch(() => {});
+}
+
 interface Props {
   children: ReactNode;
 }

@@ -9,7 +9,7 @@ import { SubtitleProject } from '../types/subtitle';
 const DB_NAME = 'SubCraftMediaStoreDB';
 const STORE_NAME = 'mediaFiles';
 const PROJECTS_STORE = 'projects';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 interface StoredMediaRecord {
   projectId: string;

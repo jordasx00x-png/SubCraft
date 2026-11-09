@@ -148,35 +148,34 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [currentTime]);
 
-  // Active cue strictly for the current playhead position
+  // Active cue strictly for the current playhead position or selected subtitle
   const activeCue = useMemo(() => {
     if (subtitles.length === 0) return null;
 
-    // 1. Direct match at currentTime (with 0.12s boundary grace period)
+    // 1. If video is paused and a cue is explicitly selected (timeline click, inspector ribbon, list),
+    // always show that selected cue on the screen so user sees what they are editing!
+    if (!isPlaying && selectedCueId !== null && selectedCueId !== undefined) {
+      const selected = subtitles.find((c) => String(c.id) === String(selectedCueId));
+      if (selected) {
+        return selected;
+      }
+    }
+
+    // 2. Direct match at currentTime (with 0.15s boundary grace period)
     const matched = subtitles.find(
-      (c) => currentTime >= c.start - 0.12 && currentTime <= c.end + 0.12
+      (c) => currentTime >= c.start - 0.15 && currentTime <= c.end + 0.15
     );
     if (matched) return matched;
 
-    // 2. If video is paused, only display a cue if currentTime is within 0.75s of it
+    // 3. When paused near any cue (within 0.75s)
     if (!isPlaying) {
-      // If a cue is selected in the inspector and is within 1s of current time, show it
-      if (selectedCueId) {
-        const selected = subtitles.find((c) => c.id === selectedCueId);
-        if (selected && Math.abs(currentTime - selected.start) < 1.0) {
-          return selected;
-        }
-      }
-
-      // Check if paused within 0.75s of any cue
       const nearCue = subtitles.find(
         (c) => currentTime >= c.start - 0.75 && currentTime <= c.end + 0.75
       );
       if (nearCue) return nearCue;
     }
 
-    // When seeking to a point where no subtitle exists (e.g. in the middle of the video),
-    // NEVER show cue #1! Return null so the screen is clean.
+    // When seeking to an empty silence point, return null (never force cue #1)
     return null;
   }, [subtitles, currentTime, isPlaying, selectedCueId]);
 
