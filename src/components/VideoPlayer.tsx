@@ -165,30 +165,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const activeCue = useMemo(() => {
     if (subtitles.length === 0) return null;
 
-    // 1. If video is paused and a cue is explicitly selected (timeline click, inspector ribbon, list),
-    // always show that selected cue on the screen so user sees what they are editing!
+    // 1. HIGHEST PRIORITY: Exact match at current playhead position
+    const activeAtTime = subtitles.find(
+      (c) => currentTime >= c.start - 0.15 && currentTime <= c.end + 0.15
+    );
+    if (activeAtTime) {
+      return activeAtTime;
+    }
+
+    // 2. SECOND PRIORITY: If paused, and user explicitly selected a cue, ONLY use it if currentTime is near that cue
     if (!isPlaying && selectedCueId !== null && selectedCueId !== undefined) {
       const selected = subtitles.find((c) => String(c.id) === String(selectedCueId));
-      if (selected) {
+      if (selected && Math.abs(currentTime - selected.start) < 1.5) {
         return selected;
       }
     }
 
-    // 2. Direct match at currentTime (with 0.15s boundary grace period)
-    const matched = subtitles.find(
-      (c) => currentTime >= c.start - 0.15 && currentTime <= c.end + 0.15
-    );
-    if (matched) return matched;
-
-    // 3. When paused near any cue (within 0.75s)
-    if (!isPlaying) {
-      const nearCue = subtitles.find(
-        (c) => currentTime >= c.start - 0.75 && currentTime <= c.end + 0.75
-      );
-      if (nearCue) return nearCue;
-    }
-
-    // When seeking to an empty silence point, return null (never force cue #1)
+    // 3. Otherwise (silence gap), return null so video screen is clean
     return null;
   }, [subtitles, currentTime, isPlaying, selectedCueId]);
 

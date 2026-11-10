@@ -178,7 +178,10 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
   const selectedCue = useMemo(() => {
     if (subtitles.length === 0) return null;
 
-    // 1. If user explicitly selected a cue (by ID), respect their explicit selection!
+    // 1. HIGHEST PRIORITY: If playhead position matches an active cue, follow the playhead!
+    if (activePlayingCue) return activePlayingCue;
+
+    // 2. SECOND PRIORITY: If in silence/paused, check if user explicitly selected a cue
     if (selectedCueId !== null && selectedCueId !== undefined) {
       const explicit = subtitles.find((c) => String(c.id) === String(selectedCueId));
       if (explicit) {
@@ -186,10 +189,7 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
       }
     }
 
-    // 2. If playhead matches an active cue, follow that active cue
-    if (activePlayingCue) return activePlayingCue;
-
-    // 3. Find the closest cue to currentTime so in the middle of the video it selects the nearest cue
+    // 3. THIRD PRIORITY: Find the closest cue to currentTime
     let closest = subtitles[0];
     let minDiff = Infinity;
     for (const cue of subtitles) {
@@ -200,7 +200,7 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
       }
     }
     return closest;
-  }, [subtitles, selectedCueId, activePlayingCue, currentTime]);
+  }, [subtitles, activePlayingCue, selectedCueId, currentTime]);
 
   const selectedIndex = useMemo(() => {
     if (!selectedCue) return -1;
