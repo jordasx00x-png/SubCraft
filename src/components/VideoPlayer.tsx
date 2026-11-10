@@ -174,7 +174,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const activeCue = useMemo(() => {
     if (subtitles.length === 0) return null;
 
-    // 1. First priority: Exact match at current playhead position
+    // 1. When video is PAUSED: If user explicitly selected a cue, show that selected cue on screen!
+    if (!isPlaying && selectedCueId !== null && selectedCueId !== undefined) {
+      const selected = subtitles.find((c) => String(c.id) === String(selectedCueId));
+      if (selected) {
+        return selected;
+      }
+    }
+
+    // 2. When video is PLAYING (or no explicit selection): Match cue active at current playhead time
     const activeAtTime = subtitles.find(
       (c) => currentTime >= c.start - 0.05 && currentTime <= c.end + 0.05
     );
@@ -182,16 +190,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       return activeAtTime;
     }
 
-    // 2. If no cue is active at current time (e.g. in a gap or paused), check if selectedCueId is within range of playhead
+    // 3. Fallback for paused state near playhead
     if (selectedCueId !== null && selectedCueId !== undefined) {
-      const selected = subtitles.find((c) => String(c.id) === String(selectedCueId));
-      if (selected && currentTime >= selected.start - 1.0 && currentTime <= selected.end + 1.0) {
-        return selected;
-      }
+      return subtitles.find((c) => String(c.id) === String(selectedCueId)) || null;
     }
 
     return null;
-  }, [subtitles, currentTime, selectedCueId]);
+  }, [subtitles, currentTime, selectedCueId, isPlaying]);
 
   // Loop current cue if enabled
   useEffect(() => {

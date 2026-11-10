@@ -180,16 +180,16 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
   const selectedCue = useMemo(() => {
     if (subtitles.length === 0) return null;
 
-    // 1. First priority: Cue active at current playhead position
-    if (activePlayingCue) return activePlayingCue;
-
-    // 2. If no cue is active at exact playhead time, respect explicit selection if available
+    // 1. First priority: Respect explicit selection if user clicked a cue block or inspector cue
     if (selectedCueId !== null && selectedCueId !== undefined) {
       const explicit = subtitles.find((c) => String(c.id) === String(selectedCueId));
       if (explicit) {
         return explicit;
       }
     }
+
+    // 2. Follow active playhead position if playing
+    if (activePlayingCue) return activePlayingCue;
 
     // 3. Find the closest cue to currentTime
     let closest = subtitles[0];

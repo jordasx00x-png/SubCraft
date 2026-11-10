@@ -430,57 +430,59 @@ export default function App() {
 
   const handleSelectSavedProject = async (proj: SubtitleProject) => {
     try {
+      setIsPlaying(false);
+
+      let restoredUrl: string | null = null;
+      let restoredFile: File | null = null;
+      let fileName = proj.videoFileName || SAMPLE_VIDEO_NAME;
+
+      // 1. Asynchronously retrieve saved video or audio file from IndexedDB BEFORE setting project state
+      try {
+        const media = await getMediaFile(proj.id);
+        if (media && media.blob) {
+          restoredUrl = URL.createObjectURL(media.blob);
+          fileName = media.fileName;
+          restoredFile =
+            media.blob instanceof File
+              ? media.blob
+              : new File([media.blob], media.fileName, { type: media.fileType || 'video/mp4' });
+        } else if (proj.videoFileName === SAMPLE_VIDEO_NAME || !proj.videoFileName) {
+          restoredUrl = SAMPLE_VIDEO_URL;
+          fileName = SAMPLE_VIDEO_NAME;
+        }
+      } catch (mediaErr) {
+        console.warn('Media file restore warning:', mediaErr);
+        if (proj.videoFileName === SAMPLE_VIDEO_NAME || !proj.videoFileName) {
+          restoredUrl = SAMPLE_VIDEO_URL;
+          fileName = SAMPLE_VIDEO_NAME;
+        }
+      }
+
+      // Revoke previous blob URL if needed
+      if (videoUrl && videoUrl !== SAMPLE_VIDEO_URL) {
+        URL.revokeObjectURL(videoUrl);
+      }
+
+      const loadedSubtitles = ensureUniqueCueIds(proj.subtitles || []);
+
+      // 2. Batch state updates together so auto-save sees restoredFile immediately
       setProjectId(proj.id);
       setProjectTitle(proj.title || 'Mi Proyecto de Video');
-      const loadedSubtitles = ensureUniqueCueIds(proj.subtitles || []);
       setSubtitles(loadedSubtitles);
       if (proj.style) setStyle(proj.style);
       if (proj.language) setLanguage(proj.language);
       if (proj.targetLanguage) setTargetLanguage(proj.targetLanguage);
-      setVideoFileName(proj.videoFileName || SAMPLE_VIDEO_NAME);
+      setVideoFileName(fileName);
+      setVideoFile(restoredFile);
+      setVideoUrl(restoredUrl);
       setSelectedCueId(loadedSubtitles.length > 0 ? loadedSubtitles[0].id : null);
       setCurrentTime(0);
-      setIsPlaying(false);
 
       // Save as active project in local storage
       try {
         localStorage.setItem('subcraft_current_project', JSON.stringify(proj));
       } catch (err) {
         console.warn(err);
-      }
-
-      // Revoke previous custom video object url if needed
-      if (videoUrl && videoUrl !== SAMPLE_VIDEO_URL) {
-        URL.revokeObjectURL(videoUrl);
-      }
-
-      // Load media file for selected project from IndexedDB safely
-      try {
-        const media = await getMediaFile(proj.id);
-        if (media && media.blob) {
-          const restoredUrl = URL.createObjectURL(media.blob);
-          setVideoUrl(restoredUrl);
-          setVideoFileName(media.fileName);
-          const restoredFile =
-            media.blob instanceof File
-              ? media.blob
-              : new File([media.blob], media.fileName, { type: media.fileType });
-          setVideoFile(restoredFile);
-        } else if (proj.videoFileName === SAMPLE_VIDEO_NAME || !proj.videoFileName) {
-          setVideoFile(null);
-          setVideoUrl(SAMPLE_VIDEO_URL);
-          setVideoFileName(SAMPLE_VIDEO_NAME);
-        } else {
-          setVideoFile(null);
-          setVideoUrl(null);
-        }
-      } catch (mediaErr) {
-        console.warn('Media file restore warning:', mediaErr);
-        if (proj.videoFileName === SAMPLE_VIDEO_NAME || !proj.videoFileName) {
-          setVideoFile(null);
-          setVideoUrl(SAMPLE_VIDEO_URL);
-          setVideoFileName(SAMPLE_VIDEO_NAME);
-        }
       }
     } catch (err) {
       console.warn('Error opening saved project:', err);

@@ -11,6 +11,7 @@ import {
   Loader2,
   AlertCircle,
   ExternalLink,
+  Video,
 } from 'lucide-react';
 import { SubtitleProject } from '../types/subtitle';
 import { fetchUserProjects, deleteProject } from '../services/projectService';
@@ -166,6 +167,15 @@ export const ProjectsModal: React.FC<ProjectsModalProps> = ({
                       </div>
                       <div className="flex items-center gap-3 text-[11px] text-neutral-500 dark:text-neutral-400 mt-1">
                         <span>{proj.subtitles?.length || 0} subtítulos</span>
+                        {proj.videoFileName && (
+                          <>
+                            <span>•</span>
+                            <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-medium truncate max-w-[160px]">
+                              <Video className="w-3 h-3 shrink-0" />
+                              <span className="truncate">{proj.videoFileName}</span>
+                            </span>
+                          </>
+                        )}
                         <span>•</span>
                         <span>{dateStr}</span>
                       </div>
