@@ -172,9 +172,10 @@ export async function runSafeAITranscription(
 
       if (response.ok) {
         const resJson = await response.json();
-        if (resJson.success && Array.isArray(resJson.data?.subtitles) && resJson.data.subtitles.length > 0) {
+        const subs = resJson.data?.subtitles;
+        if (resJson.success && Array.isArray(subs) && subs.length >= (duration > 30 ? 3 : 1)) {
           onProgress?.(100, '¡Subtítulos sincronizados con Gemini!');
-          return resJson.data.subtitles;
+          return subs;
         }
       }
     } catch (apiErr) {

@@ -138,18 +138,9 @@ Guidelines:
     });
   } catch (error: any) {
     console.error('Error in /api/transcribe:', error);
-    // Fallback response instead of failing completely
-    const offsetSeconds = req.body?.offsetSeconds || 0;
-    return res.json({
-      success: true,
-      data: {
-        detectedLanguage: 'es',
-        languageCode: 'es',
-        subtitles: [
-          { id: 1, start: offsetSeconds + 0.0, end: offsetSeconds + 4.0, text: 'Audio procesado y sincronizado correctamente.', speaker: 'Locutor' },
-          { id: 2, start: offsetSeconds + 4.0, end: offsetSeconds + 8.0, text: 'Modifica y personaliza tus subtítulos en el panel derecho.', speaker: 'Locutor' }
-        ]
-      }
+    return res.status(500).json({
+      success: false,
+      error: error?.message || 'Error al procesar audio con el servidor Gemini.',
     });
   }
 });

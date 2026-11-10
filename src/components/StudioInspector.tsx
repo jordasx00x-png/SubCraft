@@ -66,6 +66,7 @@ interface StudioInspectorProps {
   onOpenGenerate: () => void;
   onOpenExport: () => void;
   onApplyTimeShift: (cues: SubtitleCue[]) => void;
+  onRestoreSampleSubtitles?: () => void;
 }
 
 const FONT_OPTIONS = [
@@ -154,6 +155,7 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
   onOpenGenerate,
   onOpenExport,
   onApplyTimeShift,
+  onRestoreSampleSubtitles,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showFullListModal, setShowFullListModal] = useState(false);
@@ -1110,6 +1112,27 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
               Exportar
             </button>
           </div>
+
+          {/* Restore Original 62 Song Cues Card */}
+          {onRestoreSampleSubtitles && (
+            <div className="p-4 rounded-2xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/60 dark:bg-indigo-950/30 flex items-center justify-between">
+              <div>
+                <h4 className="font-extrabold text-xs text-indigo-900 dark:text-indigo-200 mb-0.5 flex items-center gap-1.5">
+                  <RotateCcw className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Restaurar 62 Subtítulos de Canción</span>
+                </h4>
+                <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                  Restaura los 62 bloques completos de "Digno Es El Cordero"
+                </p>
+              </div>
+              <button
+                onClick={onRestoreSampleSubtitles}
+                className="px-3 py-1.5 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-xs active:scale-95 cursor-pointer shrink-0"
+              >
+                Restaurar 62
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -647,6 +647,7 @@ export default function App() {
               onOpenGenerate={() => setShowGenerateModal(true)}
               onOpenExport={() => setShowExportModal(true)}
               onApplyTimeShift={setSubtitles}
+              onRestoreSampleSubtitles={() => setSubtitles(ensureUniqueCueIds(INITIAL_SAMPLE_SUBTITLES))}
             />
           </div>
         </div>
