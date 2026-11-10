@@ -421,7 +421,7 @@ export default function App() {
       const text = await file.text();
       const parsed = parseSrt(text);
       if (parsed.length > 0) {
-        setSubtitles(parsed);
+        setSubtitles(ensureUniqueCueIds(parsed));
       }
     } catch (err) {
       console.error('Error importing SRT:', err);
@@ -432,7 +432,7 @@ export default function App() {
     try {
       setProjectId(proj.id);
       setProjectTitle(proj.title || 'Mi Proyecto de Video');
-      const loadedSubtitles = proj.subtitles || [];
+      const loadedSubtitles = ensureUniqueCueIds(proj.subtitles || []);
       setSubtitles(loadedSubtitles);
       if (proj.style) setStyle(proj.style);
       if (proj.language) setLanguage(proj.language);
@@ -690,7 +690,7 @@ export default function App() {
           currentVideoUrl={videoUrl}
           videoDuration={duration}
           onSubtitlesGenerated={(newCues, detectedLang) => {
-            setSubtitles(newCues);
+            setSubtitles(ensureUniqueCueIds(newCues));
             if (detectedLang) setLanguage(detectedLang);
           }}
           onVideoSelected={handleSelectVideoFile}

@@ -152,12 +152,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [volume, isMuted]);
 
+  const isSeekingRef = useRef<boolean>(false);
+  const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // Sync video element time when currentTime prop changes externally (e.g. timeline click)
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (Math.abs(video.currentTime - currentTime) > 0.04) {
+    if (Math.abs(video.currentTime - currentTime) > 0.05) {
+      isSeekingRef.current = true;
       video.currentTime = currentTime;
+
+      if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
+      seekTimeoutRef.current = setTimeout(() => {
+        isSeekingRef.current = false;
+      }, 220);
     }
   }, [currentTime]);
 
@@ -165,25 +174,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const activeCue = useMemo(() => {
     if (subtitles.length === 0) return null;
 
-    // 1. HIGHEST PRIORITY: Exact match at current playhead position
+    // 1. First priority: Exact match at current playhead position
     const activeAtTime = subtitles.find(
-      (c) => currentTime >= c.start - 0.15 && currentTime <= c.end + 0.15
+      (c) => currentTime >= c.start - 0.05 && currentTime <= c.end + 0.05
     );
     if (activeAtTime) {
       return activeAtTime;
     }
 
-    // 2. SECOND PRIORITY: If paused, and user explicitly selected a cue, ONLY use it if currentTime is near that cue
-    if (!isPlaying && selectedCueId !== null && selectedCueId !== undefined) {
+    // 2. If no cue is active at current time (e.g. in a gap or paused), check if selectedCueId is within range of playhead
+    if (selectedCueId !== null && selectedCueId !== undefined) {
       const selected = subtitles.find((c) => String(c.id) === String(selectedCueId));
-      if (selected && Math.abs(currentTime - selected.start) < 1.5) {
+      if (selected && currentTime >= selected.start - 1.0 && currentTime <= selected.end + 1.0) {
         return selected;
       }
     }
 
-    // 3. Otherwise (silence gap), return null so video screen is clean
     return null;
-  }, [subtitles, currentTime, isPlaying, selectedCueId]);
+  }, [subtitles, currentTime, selectedCueId]);
 
   // Loop current cue if enabled
   useEffect(() => {
@@ -196,7 +204,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [loopCurrentCue, activeCue, currentTime, onSeek]);
 
   const handleTimeUpdate = () => {
-    if (videoRef.current) {
+    if (videoRef.current && !isSeekingRef.current) {
       onTimeUpdate(videoRef.current.currentTime);
     }
   };
