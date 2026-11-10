@@ -188,3 +188,19 @@ export function downloadFile(content: string | Blob, filename: string, mimeType 
   document.body.removeChild(link);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+/**
+ * Ensures all subtitle cues have strictly unique IDs to prevent duplicate ID collisions
+ */
+export function ensureUniqueCueIds(cues: SubtitleCue[]): SubtitleCue[] {
+  if (!Array.isArray(cues)) return [];
+  const seen = new Set<string | number>();
+  return cues.map((cue, idx) => {
+    let newId = cue.id;
+    if (newId === undefined || newId === null || seen.has(newId)) {
+      newId = `cue_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`;
+    }
+    seen.add(newId);
+    return { ...cue, id: newId };
+  });
+}

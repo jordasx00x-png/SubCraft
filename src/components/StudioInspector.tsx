@@ -204,6 +204,8 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
 
   const selectedIndex = useMemo(() => {
     if (!selectedCue) return -1;
+    const idx = subtitles.indexOf(selectedCue);
+    if (idx !== -1) return idx;
     return subtitles.findIndex((c) => String(c.id) === String(selectedCue.id));
   }, [subtitles, selectedCue]);
 

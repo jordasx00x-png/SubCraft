@@ -18,7 +18,7 @@ import {
 } from './services/projectService';
 import { saveMediaFile, getMediaFile } from './services/mediaStore';
 import { CheckCircle2 } from 'lucide-react';
-import { parseSrt } from './utils/subtitleFormats';
+import { parseSrt, ensureUniqueCueIds } from './utils/subtitleFormats';
 import {
   SAMPLE_VIDEO_URL,
   SAMPLE_VIDEO_NAME,
@@ -69,7 +69,7 @@ export default function App() {
   const [projectTitle, setProjectTitle] = useState<string>('Mi Proyecto de Video');
   const [language, setLanguage] = useState<string>('es');
   const [targetLanguage, setTargetLanguage] = useState<string>('es');
-  const [subtitles, setSubtitles] = useState<SubtitleCue[]>(INITIAL_SAMPLE_SUBTITLES);
+  const [subtitles, setSubtitles] = useState<SubtitleCue[]>(() => ensureUniqueCueIds(INITIAL_SAMPLE_SUBTITLES));
   const [selectedCueId, setSelectedCueId] = useState<string | number | null>(null);
   const [style, setStyle] = useState<SubtitleStyle>(DEFAULT_STYLE);
 
@@ -131,7 +131,7 @@ export default function App() {
       setProjectId(localProj.id);
       setProjectTitle(localProj.title || 'Mi Proyecto de Video');
       if (localProj.subtitles && localProj.subtitles.length > 0) {
-        setSubtitles(localProj.subtitles);
+        setSubtitles(ensureUniqueCueIds(localProj.subtitles));
       }
       if (localProj.style) {
         setStyle(localProj.style);
