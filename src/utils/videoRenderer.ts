@@ -73,8 +73,8 @@ export function drawSubtitleOnCanvas(
 ) {
   if (!cue || !cue.text.trim()) return;
 
-  // Scale font size proportionally to 1080p reference height
-  const scale = canvasHeight / 720;
+  // Scale font size proportionally to match editor preview ratio (editor preview height ~400px)
+  const scale = canvasHeight / 400;
   const scaledFontSize = Math.max(16, Math.round(style.fontSize * scale));
   const lineHeight = scaledFontSize * 1.25;
 

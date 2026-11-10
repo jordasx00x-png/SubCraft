@@ -272,12 +272,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       backgroundColor = `rgba(${r}, ${g}, ${b}, ${style.backgroundOpacity})`;
     }
 
-    const minSize = Math.max(12, Math.round(style.fontSize * 0.45));
-    const cqwVal = (style.fontSize / 7.2).toFixed(2);
-    const maxSize = Math.round(style.fontSize * 1.8);
+    const minSize = Math.max(14, Math.round(style.fontSize * 0.45));
+    const cqwVal = (style.fontSize / 5.5).toFixed(2);
+    const maxSize = Math.round(style.fontSize * 3.8);
 
     const calculatedFontSize = style.fullScreenSubtitle
-      ? `clamp(20px, ${(style.fontSize / 5.0).toFixed(2)}cqw, ${style.fontSize * 2.2}px)`
+      ? `clamp(24px, ${(style.fontSize / 4.0).toFixed(2)}cqw, ${style.fontSize * 4.5}px)`
       : `clamp(${minSize}px, ${cqwVal}cqw, ${maxSize}px)`;
 
     return {
