@@ -655,7 +655,7 @@ export default function App() {
       />
 
       {/* Main Studio Workspace Grid */}
-      <main className="flex-1 max-w-[1720px] w-full mx-auto p-2.5 sm:p-4 flex flex-col gap-3">
+      <main className="flex-1 w-full mx-auto px-3 sm:px-6 py-3 flex flex-col gap-3">
         {/* Top Section: Video Preview (7 cols) & Single Subtitle Inspector (5 cols) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-start">
           {/* Left Column: Video Player with Direct On-Screen Subtitle Editing (lg: 7 cols) */}

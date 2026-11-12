@@ -170,19 +170,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [currentTime]);
 
-  // Active cue strictly for the current playhead position or selected subtitle
+  // Active cue strictly for the selected subtitle or current playhead position
   const activeCue = useMemo(() => {
     if (subtitles.length === 0) return null;
 
-    // 1. When video is PAUSED: If user explicitly selected a cue, show that selected cue on screen!
-    if (!isPlaying && selectedCueId !== null && selectedCueId !== undefined) {
+    // 1. ALWAYS prioritize explicitly selected cue (when user clicks any subtitle block in the timeline or inspector)
+    if (selectedCueId !== null && selectedCueId !== undefined) {
       const selected = subtitles.find((c) => String(c.id) === String(selectedCueId));
       if (selected) {
         return selected;
       }
     }
 
-    // 2. When video is PLAYING (or no explicit selection): Match cue active at current playhead time
+    // 2. When playing (or no selection), match cue active at current playhead time
     const activeAtTime = subtitles.find(
       (c) => currentTime >= c.start - 0.05 && currentTime <= c.end + 0.05
     );
@@ -190,13 +190,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       return activeAtTime;
     }
 
-    // 3. Fallback for paused state near playhead
-    if (selectedCueId !== null && selectedCueId !== undefined) {
-      return subtitles.find((c) => String(c.id) === String(selectedCueId)) || null;
-    }
-
-    return null;
-  }, [subtitles, currentTime, selectedCueId, isPlaying]);
+    return subtitles[0] || null;
+  }, [subtitles, currentTime, selectedCueId]);
 
   // Loop current cue if enabled
   useEffect(() => {
