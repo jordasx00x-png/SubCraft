@@ -9,9 +9,10 @@ interface AuthModalProps {
   onClose: () => void;
   onLogoutSuccess?: () => void;
   onAdminLogin?: () => void;
+  onLoginSuccess?: () => void;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ user, onClose, onLogoutSuccess, onAdminLogin }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({ user, onClose, onLogoutSuccess, onAdminLogin, onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -22,6 +23,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ user, onClose, onLogoutSuc
       await signInWithPopup(auth, googleProvider);
       await syncUserProfile();
       onClose();
+      if (onLoginSuccess) {
+        onLoginSuccess();
+      }
     } catch (err: any) {
       console.error(err);
       if (err?.code !== 'auth/popup-closed-by-user') {

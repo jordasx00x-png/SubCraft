@@ -47,11 +47,7 @@ export function drawBackgroundLoop(
       break;
   }
 
-  // Draw audio visualizer overlay if enabled
-  if (options?.showVisualizer) {
-    drawAudioWaveformOverlay(ctx, width, height, timeSec);
-  }
-
+  // Audio visualizer overlay removed per user request
   ctx.restore();
 }
 

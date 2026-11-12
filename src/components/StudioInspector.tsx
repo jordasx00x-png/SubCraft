@@ -250,69 +250,69 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
   };
 
   return (
-    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl flex flex-col h-full shadow-lg overflow-hidden select-none">
-      {/* Tab Navigation Ribbon */}
-      <div className="p-1.5 bg-neutral-100 dark:bg-neutral-950/80 border-b border-neutral-200 dark:border-neutral-800 flex items-center gap-1">
+    <div className="bg-white dark:bg-[#10121a] border border-neutral-200 dark:border-neutral-800/90 rounded-xl flex flex-col h-full shadow-sm overflow-hidden select-none">
+      {/* Sleek Segmented Tab Ribbon */}
+      <div className="p-1 bg-neutral-100 dark:bg-neutral-950/70 border-b border-neutral-200/80 dark:border-neutral-800/80 flex items-center gap-1">
         <button
           onClick={() => onChangeTab('subtitles')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
             activeTab === 'subtitles'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-sm border border-neutral-200/80 dark:border-neutral-700/80'
+              ? 'bg-white dark:bg-neutral-800 text-neutral-950 dark:text-white shadow-xs font-semibold'
               : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
           }`}
           title="Lista y edición de subtítulos"
         >
-          <Subtitles className="w-4 h-4 text-indigo-500" />
+          <Subtitles className="w-3.5 h-3.5 text-indigo-500" />
           <span className="truncate">Subtítulos</span>
-          <span className="text-[10px] text-neutral-400 font-mono">({subtitles.length})</span>
+          <span className="text-[10px] text-neutral-600 dark:text-neutral-400 font-mono">({subtitles.length})</span>
         </button>
 
         <button
           onClick={() => onChangeTab('style')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
             activeTab === 'style'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-sm border border-neutral-200/80 dark:border-neutral-700/80'
+              ? 'bg-white dark:bg-neutral-800 text-neutral-950 dark:text-white shadow-xs font-semibold'
               : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
           }`}
           title="Tipografía y Estilos Visuales"
         >
-          <Palette className="w-4 h-4 text-violet-500" />
+          <Palette className="w-3.5 h-3.5 text-violet-500" />
           <span className="truncate">Estilo</span>
         </button>
 
         <button
           onClick={() => onChangeTab('loops')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
             activeTab === 'loops'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-sm border border-neutral-200/80 dark:border-neutral-700/80'
+              ? 'bg-white dark:bg-neutral-800 text-neutral-950 dark:text-white shadow-xs font-semibold'
               : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
           }`}
           title="Modo Audio y Fondos en Bucle"
         >
-          <Radio className="w-4 h-4 text-pink-500" />
+          <Radio className="w-3.5 h-3.5 text-pink-500" />
           <span className="truncate">Fondos</span>
           {style.isAudioMode && (
-            <span className="w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-pink-500 animate-pulse" />
           )}
         </button>
 
         <button
           onClick={() => onChangeTab('tools')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
             activeTab === 'tools'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-sm border border-neutral-200/80 dark:border-neutral-700/80'
+              ? 'bg-white dark:bg-neutral-800 text-neutral-950 dark:text-white shadow-xs font-semibold'
               : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
           }`}
-          title="Herramientas y Motor Algorítmico"
+          title="Subtítulos automáticos IA y ajustes de sincronización"
         >
-          <Cpu className="w-4 h-4 text-emerald-500" />
-          <span className="truncate">Herramientas</span>
+          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+          <span className="truncate">IA & Sinc</span>
         </button>
       </div>
 
       {successMsg && (
         <div className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 px-4 py-2 text-xs flex items-center gap-2 border-b border-emerald-200 dark:border-emerald-800">
-          <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+          <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
           <span className="font-medium">{successMsg}</span>
         </div>
       )}
@@ -337,9 +337,9 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
               </button>
             </div>
           ) : selectedCue ? (
-            <div className="space-y-2.5">
-              {/* Cue Selector & Navigation Ribbon */}
-              <div className="p-2 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-200 dark:border-neutral-700 flex items-center justify-between shadow-2xs">
+            <div className="space-y-3">
+              {/* SECCIÓN A: Navegador y Posición del Bloque */}
+              <div className="p-2.5 bg-neutral-50/70 dark:bg-neutral-900/50 rounded-xl border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
                 <button
                   disabled={selectedIndex <= 0}
                   onClick={() => {
@@ -349,20 +349,20 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                       onSeek(prev.start);
                     }
                   }}
-                  className="px-2 py-1 rounded-xl bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 disabled:opacity-30 cursor-pointer flex items-center gap-1 text-[11px] font-bold text-neutral-700 dark:text-neutral-200 transition-colors"
+                  className="px-2.5 py-1.5 rounded-lg text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800 disabled:opacity-30 cursor-pointer flex items-center gap-1 text-xs font-medium transition-colors"
                   title="Subtítulo anterior"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
                   <span>Anterior</span>
                 </button>
 
-                <div className="text-center">
-                  <span className="text-[11px] font-black text-indigo-600 dark:text-indigo-400 block uppercase tracking-wider">
-                    Subtítulo #{selectedIndex + 1} de {subtitles.length}
-                  </span>
-                  <span className="text-[9px] text-neutral-500 dark:text-neutral-400 font-mono">
+                <div className="text-center px-2">
+                  <div className="text-xs font-bold text-neutral-900 dark:text-neutral-100">
+                    Bloque {selectedIndex + 1} de {subtitles.length}
+                  </div>
+                  <div className="text-[11px] text-neutral-500 dark:text-neutral-400 font-mono">
                     {formatTimeDisplay(selectedCue.start, true)} ➔ {formatTimeDisplay(selectedCue.end, true)}
-                  </span>
+                  </div>
                 </div>
 
                 <button
@@ -374,7 +374,7 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                       onSeek(next.start);
                     }
                   }}
-                  className="px-2 py-1 rounded-xl bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 disabled:opacity-30 cursor-pointer flex items-center gap-1 text-[11px] font-bold text-neutral-700 dark:text-neutral-200 transition-colors"
+                  className="px-2.5 py-1.5 rounded-lg text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800 disabled:opacity-30 cursor-pointer flex items-center gap-1 text-xs font-medium transition-colors"
                   title="Subtítulo siguiente"
                 >
                   <span>Siguiente</span>
@@ -382,76 +382,76 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                 </button>
               </div>
 
-              {/* Selected Cue Text Editor Card */}
-              <div className="p-3 rounded-2xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 shadow-2xs space-y-2">
-                <div className="flex items-center justify-between text-[11px]">
-                  <div className="flex items-center gap-1.5 font-bold text-neutral-800 dark:text-neutral-200">
+              {/* SECCIÓN B: Editor del Contenido y Locutor */}
+              <div className="p-3.5 rounded-xl bg-white dark:bg-[#141620] border border-neutral-200/80 dark:border-neutral-800/80 shadow-xs space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
                     <Edit3 className="w-3.5 h-3.5 text-indigo-500" />
                     <span>Texto del Subtítulo</span>
-                  </div>
+                  </span>
 
-                  <span className={`font-mono text-[9px] px-2 py-0.5 rounded-full ${
-                    selectedCue.text.length > 45
-                      ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 font-bold'
-                      : 'bg-neutral-100 dark:bg-neutral-700 text-neutral-500'
-                  }`}>
-                    {selectedCue.text.length} chars
+                  <span className="text-[11px] text-neutral-500 font-mono">
+                    {selectedCue.text.length} carácteres
                   </span>
                 </div>
 
                 <textarea
                   value={selectedCue.text}
                   onChange={(e) => onUpdateCue({ ...selectedCue, text: e.target.value })}
-                  rows={2}
-                  placeholder="Escribe aquí el texto del subtítulo..."
-                  className="w-full p-2.5 text-xs font-medium rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 focus:ring-2 focus:ring-indigo-500 outline-none resize-none leading-normal transition-all"
+                  rows={3}
+                  placeholder="Escribe o edita el texto del subtítulo..."
+                  className="w-full p-2.5 text-xs font-medium rounded-lg bg-neutral-50 dark:bg-[#0c0d12] border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none resize-none leading-relaxed transition-all"
                 />
 
-                {/* Speaker Tag Field */}
-                <div className="flex items-center gap-2 bg-neutral-50 dark:bg-neutral-900 p-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700">
-                  <User className="w-3 h-3 text-neutral-400 shrink-0 ml-1" />
+                <div className="flex items-center gap-2 bg-neutral-50 dark:bg-[#0c0d12] px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800">
+                  <User className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
                   <input
                     type="text"
-                    placeholder="Hablante (opcional)"
+                    placeholder="Locutor (opcional)"
                     value={selectedCue.speaker || ''}
                     onChange={(e) => onUpdateCue({ ...selectedCue, speaker: e.target.value })}
-                    className="w-full text-[10px] bg-transparent outline-none text-neutral-800 dark:text-neutral-200 placeholder-neutral-400"
+                    className="w-full text-xs bg-transparent outline-none text-neutral-800 dark:text-neutral-200 placeholder-neutral-400 font-medium"
                   />
                 </div>
               </div>
 
-              {/* Timing Step Controls */}
-              <div className="p-3 rounded-2xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 shadow-2xs space-y-2">
-                <div className="flex items-center justify-between text-[11px] font-bold text-neutral-800 dark:text-neutral-200">
-                  <div className="flex items-center gap-1.5">
+              {/* SECCIÓN C: Calibración Precisa de Tiempos */}
+              <div className="p-3.5 rounded-xl bg-white dark:bg-[#141620] border border-neutral-200/80 dark:border-neutral-800/80 shadow-xs space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Control de Tiempos</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-neutral-500">
+                    <span>Sincronización</span>
+                  </span>
+                  <span className="text-[11px] font-mono text-neutral-500">
                     Duración: {Math.round((selectedCue.end - selectedCue.start) * 10) / 10}s
                   </span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   {/* Start time */}
-                  <div className="p-2 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 flex items-center justify-between">
-                    <span className="text-[9px] font-bold text-neutral-500">Inicio</span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleTimeStep(selectedCue, 'start', -0.1)}
-                        className="w-5 h-5 rounded bg-white dark:bg-neutral-800 font-bold text-neutral-700 dark:text-neutral-200 text-[10px] hover:bg-indigo-50"
-                      >
-                        -
-                      </button>
+                  <div className="p-2 rounded-lg bg-neutral-50 dark:bg-[#0c0d12] border border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] text-neutral-500 uppercase tracking-wider block font-semibold">Inicio</span>
                       <span
                         onClick={() => onSeek(selectedCue.start + 0.05)}
-                        className="text-[11px] font-mono font-bold text-neutral-800 dark:text-neutral-200 cursor-pointer hover:underline"
+                        className="text-xs font-mono font-bold text-neutral-900 dark:text-neutral-100 cursor-pointer hover:text-indigo-500"
+                        title="Ir a este segundo"
                       >
                         {formatTimeDisplay(selectedCue.start, true)}
                       </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleTimeStep(selectedCue, 'start', -0.1)}
+                        className="w-6 h-6 rounded bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 font-bold text-neutral-700 dark:text-neutral-200 text-xs hover:bg-neutral-100 cursor-pointer flex items-center justify-center"
+                        title="Restar 0.1s"
+                      >
+                        -
+                      </button>
                       <button
                         onClick={() => handleTimeStep(selectedCue, 'start', 0.1)}
-                        className="w-5 h-5 rounded bg-white dark:bg-neutral-800 font-bold text-neutral-700 dark:text-neutral-200 text-[10px] hover:bg-indigo-50"
+                        className="w-6 h-6 rounded bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 font-bold text-neutral-700 dark:text-neutral-200 text-xs hover:bg-neutral-100 cursor-pointer flex items-center justify-center"
+                        title="Sumar 0.1s"
                       >
                         +
                       </button>
@@ -459,24 +459,29 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                   </div>
 
                   {/* End time */}
-                  <div className="p-2 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 flex items-center justify-between">
-                    <span className="text-[9px] font-bold text-neutral-500">Fin</span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleTimeStep(selectedCue, 'end', -0.1)}
-                        className="w-5 h-5 rounded bg-white dark:bg-neutral-800 font-bold text-neutral-700 dark:text-neutral-200 text-[10px] hover:bg-indigo-50"
-                      >
-                        -
-                      </button>
+                  <div className="p-2 rounded-lg bg-neutral-50 dark:bg-[#0c0d12] border border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] text-neutral-500 uppercase tracking-wider block font-semibold">Fin</span>
                       <span
                         onClick={() => onSeek(Math.max(selectedCue.start, selectedCue.end - 0.2))}
-                        className="text-[11px] font-mono font-bold text-neutral-800 dark:text-neutral-200 cursor-pointer hover:underline"
+                        className="text-xs font-mono font-bold text-neutral-900 dark:text-neutral-100 cursor-pointer hover:text-indigo-500"
+                        title="Ir al final de este bloque"
                       >
                         {formatTimeDisplay(selectedCue.end, true)}
                       </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleTimeStep(selectedCue, 'end', -0.1)}
+                        className="w-6 h-6 rounded bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 font-bold text-neutral-700 dark:text-neutral-200 text-xs hover:bg-neutral-100 cursor-pointer flex items-center justify-center"
+                        title="Restar 0.1s"
+                      >
+                        -
+                      </button>
                       <button
                         onClick={() => handleTimeStep(selectedCue, 'end', 0.1)}
-                        className="w-5 h-5 rounded bg-white dark:bg-neutral-800 font-bold text-neutral-700 dark:text-neutral-200 text-[10px] hover:bg-indigo-50"
+                        className="w-6 h-6 rounded bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 font-bold text-neutral-700 dark:text-neutral-200 text-xs hover:bg-neutral-100 cursor-pointer flex items-center justify-center"
+                        title="Sumar 0.1s"
                       >
                         +
                       </button>
@@ -485,15 +490,15 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                 </div>
               </div>
 
-              {/* Action Toolbar */}
-              <div className="grid grid-cols-4 gap-1.5">
+              {/* SECCIÓN D: Barra de Acciones del Bloque */}
+              <div className="grid grid-cols-4 gap-1.5 pt-1">
                 <button
                   onClick={() => onPlaySpan(selectedCue.start, selectedCue.end)}
-                  className="py-1.5 px-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
-                  title="Escuchar Segmento"
+                  className="py-2 px-2.5 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-950 text-xs font-semibold hover:opacity-90 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
+                  title="Reproducir este subtítulo"
                 >
-                  <Play className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Play</span>
+                  <Play className="w-3 h-3 fill-current" />
+                  <span>Escuchar</span>
                 </button>
 
                 <button
@@ -506,48 +511,49 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                     };
                     onAddCue(newCue, selectedIndex + 1);
                   }}
-                  className="py-1.5 px-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
-                  title="Añadir subtítulo siguiente"
+                  className="py-2 px-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
+                  title="Añadir nuevo bloque después de este"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">+Nuevo</span>
+                  <Plus className="w-3 h-3" />
+                  <span>+ Bloque</span>
                 </button>
 
                 <button
                   onClick={() => onSplitCue(selectedIndex)}
-                  className="py-1.5 px-2 rounded-xl bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-800 dark:text-neutral-100 text-[11px] font-semibold flex items-center justify-center gap-1 cursor-pointer"
-                  title="Dividir subtítulo"
+                  className="py-2 px-2.5 rounded-lg bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  title="Dividir en 2 partes por el medio"
                 >
-                  <Scissors className="w-3.5 h-3.5 text-amber-500" />
-                  <span className="hidden sm:inline">Dividir</span>
+                  <Scissors className="w-3 h-3 text-amber-500" />
+                  <span>Dividir</span>
                 </button>
 
                 <button
                   onClick={() => onDeleteCue(selectedCue.id)}
-                  className="py-1.5 px-2 rounded-xl bg-red-100 dark:bg-red-950/60 hover:bg-red-200 dark:hover:bg-red-900 text-red-600 dark:text-red-300 text-[11px] font-semibold flex items-center justify-center gap-1 cursor-pointer"
-                  title="Eliminar subtítulo"
+                  className="py-2 px-2.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 hover:border-red-500/20 border border-transparent text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  title="Eliminar este subtítulo"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Borrar</span>
+                  <Trash2 className="w-3 h-3" />
+                  <span>Eliminar</span>
                 </button>
               </div>
 
-              {/* Bottom Drawer Toggle for Full List */}
-              <div className="pt-1.5 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-between text-[11px] text-neutral-500">
+              {/* SECCIÓN E: Accesos Directos SRT / Lista */}
+              <div className="pt-2 border-t border-neutral-200/80 dark:border-neutral-800/80 flex items-center justify-between text-xs text-neutral-500">
                 <button
                   onClick={() => setShowFullListModal(true)}
-                  className="hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1 font-bold cursor-pointer"
+                  className="hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1.5 font-medium cursor-pointer"
                 >
                   <ListFilter className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>Ver lista completa SRT ({subtitles.length})</span>
+                  <span>Ver todos ({subtitles.length})</span>
                 </button>
 
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   className="hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1 font-medium cursor-pointer"
+                  title="Cargar archivo .SRT externo"
                 >
-                  <UploadCloud className="w-3 h-3" />
-                  <span>SRT</span>
+                  <UploadCloud className="w-3.5 h-3.5" />
+                  <span>Importar .SRT</span>
                 </button>
                 <input
                   ref={fileInputRef}
@@ -1093,24 +1099,6 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                 + {timeShiftOffset}s
               </button>
             </div>
-          </div>
-
-          {/* Export Hub Shortcut */}
-          <div className="p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-800/30 flex items-center justify-between">
-            <div>
-              <h4 className="font-extrabold text-xs text-neutral-900 dark:text-neutral-100 mb-0.5">
-                Exportar Proyecto
-              </h4>
-              <p className="text-[11px] text-neutral-500">
-                Descarga en .SRT, .VTT o quema en video HD
-              </p>
-            </div>
-            <button
-              onClick={onOpenExport}
-              className="px-3.5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-md active:scale-95 cursor-pointer"
-            >
-              Exportar
-            </button>
           </div>
 
           {/* Restore Original 62 Song Cues Card */}

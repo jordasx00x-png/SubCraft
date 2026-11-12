@@ -168,47 +168,50 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   const playheadPercent = Math.min(100, Math.max(0, (currentTime / safeDuration) * 100));
 
   return (
-    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-3 sm:p-4 shadow-sm select-none flex flex-col gap-2.5">
+    <div className="bg-white dark:bg-[#10121a] border border-neutral-200 dark:border-neutral-800/90 rounded-xl p-3 sm:p-3.5 shadow-xs select-none flex flex-col gap-2.5">
       {/* Top Timeline Toolbar */}
       <div className="flex items-center justify-between text-xs">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-neutral-800 dark:text-neutral-200 font-bold">
-            <Clock className="w-4 h-4 text-indigo-500" />
-            <span className="hidden sm:inline">Línea de Tiempo Multitrack</span>
-            <span className="text-[11px] font-mono font-medium text-neutral-500 bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded-full">
-              {subtitles.length} bloques
-            </span>
+        <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-1.5 text-neutral-900 dark:text-white font-semibold">
+            <Clock className="w-3.5 h-3.5 text-indigo-500" />
+            <span className="hidden sm:inline">Línea de Tiempo</span>
           </div>
 
-          <div className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-800 p-0.5 rounded-lg border border-neutral-200 dark:border-neutral-700">
+          <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">·</span>
+
+          <span className="text-[11px] font-mono text-neutral-500">
+            {subtitles.length} bloques
+          </span>
+
+          <div className="flex items-center bg-neutral-100 dark:bg-neutral-800/80 p-0.5 rounded-md border border-neutral-200 dark:border-neutral-700 ml-1">
             <button
               onClick={handlePrevCue}
               className="p-1 hover:text-indigo-600 dark:hover:text-indigo-400 rounded transition-colors cursor-pointer"
               title="Subtítulo anterior"
             >
-              <SkipBack className="w-3.5 h-3.5" />
+              <SkipBack className="w-3 h-3" />
             </button>
             <button
               onClick={handleNextCue}
               className="p-1 hover:text-indigo-600 dark:hover:text-indigo-400 rounded transition-colors cursor-pointer"
               title="Subtítulo siguiente"
             >
-              <SkipForward className="w-3.5 h-3.5" />
+              <SkipForward className="w-3 h-3" />
             </button>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-800 px-1 py-0.5 rounded-lg border border-neutral-200 dark:border-neutral-700">
+          <div className="flex items-center bg-neutral-100 dark:bg-neutral-800/80 px-1 py-0.5 rounded-md border border-neutral-200 dark:border-neutral-700">
             <button
               onClick={() => setZoomLevel((z) => Math.max(1, z / 2))}
               disabled={zoomLevel <= 1}
               className="p-1 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-30 cursor-pointer"
               title="Alejar Zoom"
             >
-              <ZoomOut className="w-3.5 h-3.5" />
+              <ZoomOut className="w-3 h-3" />
             </button>
-            <span className="text-[10px] font-mono px-1 font-semibold text-neutral-700 dark:text-neutral-300">
+            <span className="text-[10px] font-mono px-1 font-semibold text-neutral-600 dark:text-neutral-400">
               {zoomLevel}x
             </span>
             <button
@@ -217,17 +220,17 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
               className="p-1 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-30 cursor-pointer"
               title="Acercar Zoom"
             >
-              <ZoomIn className="w-3.5 h-3.5" />
+              <ZoomIn className="w-3 h-3" />
             </button>
           </div>
 
           <button
             onClick={() => onAddCueAtTime(currentTime)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white shadow-xs transition-all cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition-colors cursor-pointer"
             title="Añadir subtítulo en el tiempo actual"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>+ Subtítulo en {formatTimeDisplay(currentTime, false)}</span>
+            <Plus className="w-3 h-3" />
+            <span>+ Bloque en {formatTimeDisplay(currentTime, false)}</span>
           </button>
         </div>
       </div>
@@ -329,11 +332,11 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
         </div>
       </div>
 
-      {/* Interactive Global Navigation Bar ("Linea para mover toda la linea del tiempo") */}
-      <div className="flex items-center gap-3 bg-neutral-100 dark:bg-neutral-950 p-2 rounded-xl border border-neutral-200 dark:border-neutral-800">
-        <span className="text-[11px] font-bold text-neutral-600 dark:text-neutral-400 shrink-0 flex items-center gap-1">
+      {/* Interactive Global Navigation Bar */}
+      <div className="flex items-center gap-3 bg-neutral-50 dark:bg-[#0c0d12] px-3 py-2 rounded-lg border border-neutral-200/80 dark:border-neutral-800">
+        <span className="text-[11px] font-medium text-neutral-500 shrink-0 flex items-center gap-1.5">
           <MoveHorizontal className="w-3.5 h-3.5 text-indigo-500" />
-          <span>Mover Línea del Tiempo:</span>
+          <span>Posición global:</span>
         </span>
 
         <input
@@ -347,11 +350,11 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             onSeek(targetTime);
             onPause?.();
           }}
-          className="w-full h-2 bg-neutral-200 dark:bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-          title="Desliza esta barra para desplazarte libremente por todo el video"
+          className="w-full h-1.5 bg-neutral-200 dark:bg-neutral-800 rounded appearance-none cursor-pointer accent-indigo-500"
+          title="Desliza para desplazarte por la pista"
         />
 
-        <span className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400 shrink-0">
+        <span className="text-xs font-mono font-medium text-neutral-900 dark:text-neutral-100 shrink-0">
           {formatTimeDisplay(currentTime, true)}
         </span>
       </div>

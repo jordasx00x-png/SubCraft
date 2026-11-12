@@ -38,14 +38,16 @@ import { AiPolishModal } from './components/AiPolishModal';
 import { TimeShiftModal } from './components/TimeShiftModal';
 import { AuthModal } from './components/AuthModal';
 import { LandingPage } from './components/LandingPage';
+import { ProjectsDashboard } from './components/ProjectsDashboard';
+import { CreateProjectModal } from './components/CreateProjectModal';
 import { AddVideoModal } from './components/AddVideoModal';
 import { BackgroundLoopModal } from './components/BackgroundLoopModal';
 import { StyleEditor } from './components/StyleEditor';
 import { AdminModal } from './components/AdminModal';
 
 export default function App() {
-  // Navigation view: 'landing' (login & presentation) or 'studio' (editor)
-  const [currentView, setCurrentView] = useState<'landing' | 'studio'>('landing');
+  // Navigation view: 'landing' (login & presentation), 'dashboard' (saved projects & new project), or 'studio' (editor)
+  const [currentView, setCurrentView] = useState<'landing' | 'dashboard' | 'studio'>('landing');
 
   // Studio Inspector Tab: 'subtitles' | 'style' | 'loops' | 'ai'
   const [activeStudioTab, setActiveStudioTab] = useState<StudioTab>('subtitles');
@@ -82,6 +84,7 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
 
   // Modals (for workflows that require dedicated dialogs)
+  const [showCreateProjectModal, setShowCreateProjectModal] = useState<boolean>(false);
   const [showGenerateModal, setShowGenerateModal] = useState<boolean>(false);
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
   const [showProjectsModal, setShowProjectsModal] = useState<boolean>(false);
@@ -97,7 +100,7 @@ export default function App() {
   const handleAdminLogin = () => {
     setIsAdminSession(true);
     localStorage.setItem('subcraft_admin_session', 'true');
-    setCurrentView('studio');
+    setCurrentView('dashboard');
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -494,16 +497,51 @@ export default function App() {
   };
 
   const handleCreateNewProject = () => {
+    setShowCreateProjectModal(true);
+  };
+
+  const handleCreateConfiguredProject = (data: {
+    title: string;
+    mediaFile: File | null;
+    mediaUrl: string | null;
+    mediaFileName: string;
+    duration?: number;
+    language: string;
+    isAudioMode: boolean;
+    style?: SubtitleStyle;
+    preset?: any;
+    initialSubtitles?: any[];
+  }) => {
     const newId = `proj_${Date.now()}`;
     setProjectId(newId);
-    setProjectTitle('Nuevo Proyecto de Subtítulos');
-    setSubtitles([]);
-    setStyle(DEFAULT_STYLE);
+    setProjectTitle(data.title || 'Nuevo Proyecto');
+    const initialCues = data.initialSubtitles && data.initialSubtitles.length > 0
+      ? ensureUniqueCueIds(data.initialSubtitles)
+      : [];
+    setSubtitles(initialCues);
+    if (data.style) {
+      setStyle(data.style);
+    }
+    if (data.language) {
+      setLanguage(data.language);
+    }
+    setVideoFileName(data.mediaFileName || '');
+    setVideoFile(data.mediaFile);
+    setVideoUrl(data.mediaUrl);
+    if (data.duration) {
+      setDuration(data.duration);
+    }
     setCurrentTime(0);
     setIsPlaying(false);
-    setSelectedCueId(null);
+    setSelectedCueId(initialCues.length > 0 ? initialCues[0].id : null);
+
+    // Save media file to IndexedDB immediately if provided
+    if (data.mediaFile) {
+      saveMediaFile(newId, data.mediaFile, data.mediaFileName);
+    }
+
+    setShowCreateProjectModal(false);
     setCurrentView('studio');
-    setShowProjectsModal(false);
   };
 
   if (currentView === 'landing') {
@@ -512,6 +550,7 @@ export default function App() {
         <LandingPage
           user={user}
           onEnterStudio={() => setCurrentView('studio')}
+          onOpenDashboard={() => setCurrentView('dashboard')}
           onUploadVideoDirect={(file) => {
             handleSelectVideoFile(file);
             setCurrentView('studio');
@@ -530,6 +569,46 @@ export default function App() {
             onNewProject={handleCreateNewProject}
             onLoginClick={() => setShowAuthModal(true)}
             onClose={() => setShowProjectsModal(false)}
+          />
+        )}
+
+        {showCreateProjectModal && (
+          <CreateProjectModal
+            onClose={() => setShowCreateProjectModal(false)}
+            onCreateProject={handleCreateConfiguredProject}
+          />
+        )}
+
+        {showAuthModal && (
+          <AuthModal
+            user={user}
+            onClose={() => setShowAuthModal(false)}
+            onLogoutSuccess={() => setCurrentView('landing')}
+            onAdminLogin={handleAdminLogin}
+            onLoginSuccess={() => setCurrentView('dashboard')}
+          />
+        )}
+      </>
+    );
+  }
+
+  if (currentView === 'dashboard') {
+    return (
+      <>
+        <ProjectsDashboard
+          user={user}
+          isAdmin={isAdmin}
+          currentProjectId={projectId}
+          onOpenProject={handleSelectSavedProject}
+          onOpenCreateProjectModal={() => setShowCreateProjectModal(true)}
+          onOpenStudioDirect={() => setCurrentView('studio')}
+          onLogout={handleLogout}
+        />
+
+        {showCreateProjectModal && (
+          <CreateProjectModal
+            onClose={() => setShowCreateProjectModal(false)}
+            onCreateProject={handleCreateConfiguredProject}
           />
         )}
 
@@ -568,16 +647,11 @@ export default function App() {
         onOpenAdmin={() => setShowAdminModal(true)}
         onLoginClick={() => setShowAuthModal(true)}
         onLogoutClick={handleLogout}
-        onOpenProjects={() => setShowProjectsModal(true)}
+        onOpenProjects={() => setCurrentView('dashboard')}
         onNewProject={handleCreateNewProject}
         onSaveProject={handleManualSaveProject}
         onOpenExport={() => setShowExportModal(true)}
-        onOpenStyle={() => setActiveStudioTab('style')}
-        onOpenTranslate={() => setActiveStudioTab('tools')}
-        onOpenGenerate={() => setShowGenerateModal(true)}
-        onAddVideoClick={() => setShowAddVideoModal(true)}
-        onGoHome={() => setCurrentView('landing')}
-        onOpenBackgroundLoop={() => setActiveStudioTab('loops')}
+        onGoHome={() => setCurrentView(user || isAdmin ? 'dashboard' : 'landing')}
       />
 
       {/* Main Studio Workspace Grid */}
@@ -721,6 +795,13 @@ export default function App() {
           onNewProject={handleCreateNewProject}
           onLoginClick={() => setShowAuthModal(true)}
           onClose={() => setShowProjectsModal(false)}
+        />
+      )}
+
+      {showCreateProjectModal && (
+        <CreateProjectModal
+          onClose={() => setShowCreateProjectModal(false)}
+          onCreateProject={handleCreateConfiguredProject}
         />
       )}
 

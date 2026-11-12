@@ -15,6 +15,7 @@ import {
   Clock,
   Loader2,
   Crown,
+  FolderOpen,
 } from 'lucide-react';
 import { signInWithPopup, User } from 'firebase/auth';
 import { auth, googleProvider } from '../firebase';
@@ -25,6 +26,7 @@ import { PWAInstallButton } from './PWAInstallButton';
 interface LandingPageProps {
   user: User | null;
   onEnterStudio: () => void;
+  onOpenDashboard?: () => void;
   onUploadVideoDirect: (file: File) => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
@@ -34,6 +36,7 @@ interface LandingPageProps {
 export const LandingPage: React.FC<LandingPageProps> = ({
   user,
   onEnterStudio,
+  onOpenDashboard,
   onUploadVideoDirect,
   darkMode,
   onToggleDarkMode,
@@ -49,7 +52,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     try {
       await signInWithPopup(auth, googleProvider);
       await syncUserProfile();
-      onEnterStudio();
+      if (onOpenDashboard) {
+        onOpenDashboard();
+      } else {
+        onEnterStudio();
+      }
     } catch (err: any) {
       if (err?.code !== 'auth/popup-closed-by-user') {
         if (err?.code === 'auth/unauthorized-domain' || err?.message?.includes('unauthorized-domain')) {
@@ -198,13 +205,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <span>Sesión activa con Google · Autoguardado en la nube</span>
               </div>
 
-              <button
-                onClick={onEnterStudio}
-                className="w-full py-3.5 px-5 text-sm font-bold rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white shadow-lg shadow-indigo-600/30 transition-all cursor-pointer flex items-center justify-center gap-2"
-              >
-                <span>Entrar al Studio de Subtítulos</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={onOpenDashboard || onEnterStudio}
+                  className="w-full py-3.5 px-5 text-sm font-bold rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white shadow-lg shadow-indigo-600/30 transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <FolderOpen className="w-4 h-4" />
+                  <span>Ver Mis Proyectos Guardados</span>
+                  <ArrowRight className="w-4 h-4 ml-auto" />
+                </button>
+
+                <button
+                  onClick={onEnterStudio}
+                  className="w-full py-2.5 px-4 text-xs font-semibold rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <span>Ir directamente al Studio Editor</span>
+                </button>
+              </div>
             </div>
           ) : (
             <div className="w-full space-y-3.5">

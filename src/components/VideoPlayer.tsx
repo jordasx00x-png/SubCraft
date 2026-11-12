@@ -352,63 +352,65 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   return (
     <div className="flex flex-col gap-2">
       {/* Upper Monitor Bar: Source Info & Aspect Ratio Switcher */}
-      <div className="flex items-center justify-between text-xs px-1 text-neutral-600 dark:text-neutral-400">
+      <div className="flex items-center justify-between text-xs px-0.5 text-neutral-500">
         <div className="flex items-center gap-2 min-w-0">
           <span className="font-semibold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5 truncate">
             {style.isAudioMode ? (
-              <Radio className="w-4 h-4 text-pink-500 shrink-0" />
+              <Radio className="w-3.5 h-3.5 text-pink-500 shrink-0" />
             ) : (
-              <Video className="w-4 h-4 text-indigo-500 shrink-0" />
+              <Video className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
             )}
-            <span className="truncate max-w-[220px] sm:max-w-xs">
+            <span className="truncate max-w-[200px] sm:max-w-xs text-xs">
               {videoFileName || 'Proyecto de Video'}
             </span>
           </span>
 
-          <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700 hidden sm:inline">
-            {style.isAudioMode ? 'Puro Audio + 60fps Loop' : 'Video 1080p'}
+          <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700 hidden sm:inline">·</span>
+
+          <span className="text-[11px] text-neutral-500 dark:text-neutral-400 hidden sm:inline">
+            {style.isAudioMode ? 'Puro Audio (60fps)' : 'Vista Previa'}
           </span>
         </div>
 
         {/* Aspect Ratio Switcher (16:9, 9:16 Reels, 1:1 Feed) */}
-        <div className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-800 p-0.5 rounded-lg border border-neutral-200 dark:border-neutral-700">
+        <div className="flex items-center bg-neutral-200/70 dark:bg-neutral-900 p-0.5 rounded-lg border border-neutral-300/60 dark:border-neutral-800">
           <button
             onClick={() => setAspectRatio('16:9')}
-            className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+            className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
               aspectRatio === '16:9'
-                ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-xs'
-                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-xs font-semibold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
             }`}
-            title="Formato Horizontal (YouTube / TV / Pantalla normal)"
+            title="Horizontal 16:9 (YouTube / Monitor)"
           >
-            <Monitor className="w-3.5 h-3.5" />
-            <span className="hidden xs:inline">16:9</span>
+            <Monitor className="w-3 h-3" />
+            <span>16:9</span>
           </button>
 
           <button
             onClick={() => setAspectRatio('9:16')}
-            className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+            className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
               aspectRatio === '9:16'
-                ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-xs'
-                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-xs font-semibold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
             }`}
-            title="Formato Vertical (TikTok / Reels / Shorts)"
+            title="Vertical 9:16 (TikTok / Reels / Shorts)"
           >
-            <Smartphone className="w-3.5 h-3.5 text-pink-500" />
-            <span className="hidden xs:inline">9:16</span>
+            <Smartphone className="w-3 h-3 text-pink-500" />
+            <span>9:16</span>
           </button>
 
           <button
             onClick={() => setAspectRatio('1:1')}
-            className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+            className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
               aspectRatio === '1:1'
-                ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-xs'
-                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-xs font-semibold'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
             }`}
-            title="Formato Cuadrado (Instagram / LinkedIn Post)"
+            title="Cuadrado 1:1 (Post / Feed)"
           >
-            <Square className="w-3.5 h-3.5" />
-            <span className="hidden xs:inline">1:1</span>
+            <Square className="w-3 h-3" />
+            <span>1:1</span>
           </button>
         </div>
       </div>
@@ -503,32 +505,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
             {/* Quick On-Video Header (Hover overlay) */}
             <div
-              className={`absolute top-0 inset-x-0 p-3 bg-gradient-to-b from-black/80 via-black/30 to-transparent flex items-center justify-between z-30 transition-opacity duration-300 ${
+              className={`absolute top-0 inset-x-0 p-3 bg-gradient-to-b from-black/80 via-black/20 to-transparent flex items-center justify-between z-30 transition-opacity duration-300 ${
                 showControls ? 'opacity-100' : 'opacity-0'
               }`}
             >
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold text-white/90 bg-white/10 backdrop-blur-md px-2.5 py-1 rounded-md border border-white/10 flex items-center gap-1.5 truncate max-w-[260px]">
-                  <Video className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="text-[11px] font-medium text-white/90 drop-shadow-sm flex items-center gap-1.5 truncate max-w-[280px]">
+                  <Video className="w-3.5 h-3.5 text-white/70" />
                   <span className="truncate">{videoFileName}</span>
                 </span>
               </div>
 
               <div className="flex items-center gap-2">
-                {onOpenBackgroundLoopModal && (
-                  <button
-                    onClick={onOpenBackgroundLoopModal}
-                    className="text-[11px] font-semibold text-white bg-violet-600/80 hover:bg-violet-600 backdrop-blur-md px-2.5 py-1 rounded-lg border border-violet-400/30 flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                    <span className="hidden xs:inline">Fondos Loop</span>
-                  </button>
-                )}
                 <button
                   onClick={onUploadNewVideo}
-                  className="text-[11px] font-semibold text-white bg-indigo-600/80 hover:bg-indigo-600 backdrop-blur-md px-2.5 py-1 rounded-lg border border-indigo-400/30 flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                  className="text-[11px] font-medium text-white/90 hover:text-white bg-black/40 hover:bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-md border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Cambiar archivo multimedia"
                 >
-                  <Upload className="w-3.5 h-3.5" />
+                  <Upload className="w-3 h-3 text-white/80" />
                   <span>Cambiar Video</span>
                 </button>
               </div>
