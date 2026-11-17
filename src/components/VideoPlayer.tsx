@@ -2,19 +2,14 @@ import React, { useRef, useEffect, useState, useMemo } from 'react';
 import {
   Play,
   Pause,
-  RotateCcw,
   Volume2,
   VolumeX,
   Maximize,
   Minimize,
   Upload,
   Repeat,
-  FastForward,
-  Rewind,
   Video,
   Radio,
-  Sparkles,
-  Music,
   Smartphone,
   Monitor,
   Square,
@@ -61,7 +56,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onSeek,
   onUploadNewVideo,
   onLoadSampleVideo,
-  onOpenBackgroundLoopModal,
   onUpdateCue,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -74,9 +68,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [playbackRate, setPlaybackRate] = useState<number>(1);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [loopCurrentCue, setLoopCurrentCue] = useState<boolean>(false);
-  const [showControls, setShowControls] = useState<boolean>(true);
   const [isEditingOnScreen, setIsEditingOnScreen] = useState<boolean>(false);
-  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Ultra-smooth 60 FPS Background Loop Canvas animation for Audio Mode
   useEffect(() => {
@@ -100,7 +92,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         canvas.height = targetH;
       }
 
-      // Smooth continuous time calculation for 60fps animations
       const elapsedSec = isPlaying
         ? baseTime + (timestamp - startTimestamp) / 1000
         : currentTime;
@@ -123,7 +114,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     animId = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animId);
-  }, [style.isAudioMode, style.backgroundLoop, style.showAudioVisualizer, isPlaying]);
+  }, [style.isAudioMode, style.backgroundLoop, style.showAudioVisualizer, isPlaying, currentTime]);
 
   // Sync internal video element with isPlaying state
   useEffect(() => {
@@ -155,7 +146,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const isSeekingRef = useRef<boolean>(false);
   const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Sync video element time when currentTime prop changes externally (e.g. timeline click)
+  // Sync video element time when currentTime prop changes externally
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -170,11 +161,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [currentTime]);
 
-  // Active cue strictly for the selected subtitle or current playhead position
+  // Active cue: strictly follow playhead when playing, and selectedCueId when paused
   const activeCue = useMemo(() => {
     if (subtitles.length === 0) return null;
 
-    // 1. ALWAYS prioritize explicitly selected cue (when user clicks any subtitle block in the timeline or inspector)
+    if (isPlaying) {
+      return (
+        subtitles.find((c) => currentTime >= c.start - 0.05 && currentTime <= c.end + 0.05) || null
+      );
+    }
+
     if (selectedCueId !== null && selectedCueId !== undefined) {
       const selected = subtitles.find((c) => String(c.id) === String(selectedCueId));
       if (selected) {
@@ -182,7 +178,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     }
 
-    // 2. When playing (or no selection), match cue active at current playhead time
     const activeAtTime = subtitles.find(
       (c) => currentTime >= c.start - 0.05 && currentTime <= c.end + 0.05
     );
@@ -190,8 +185,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       return activeAtTime;
     }
 
-    return subtitles[0] || null;
-  }, [subtitles, currentTime, selectedCueId]);
+    return null;
+  }, [subtitles, currentTime, selectedCueId, isPlaying]);
 
   // Loop current cue if enabled
   useEffect(() => {
@@ -239,16 +234,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       document.exitFullscreen().catch(() => {});
       setIsFullscreen(false);
     }
-  };
-
-  const handleMouseMove = () => {
-    setShowControls(true);
-    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-    controlsTimeoutRef.current = setTimeout(() => {
-      if (isPlaying) {
-        setShowControls(false);
-      }
-    }, 2800);
   };
 
   // Build real-time CSS for subtitle overlay
@@ -314,9 +299,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, [style]);
 
-  // Position class for overlay
   const positionClass = useMemo(() => {
-    let vertical = 'bottom-10 inset-x-0 items-end';
+    let vertical = 'bottom-8 inset-x-0 items-end';
     if (style.position === 'top') {
       vertical = 'top-6 inset-x-0 items-start';
     } else if (style.position === 'middle' || style.fullScreenSubtitle) {
@@ -333,365 +317,357 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return `${vertical} ${horizontal}`;
   }, [style.position, style.textAlign, style.fullScreenSubtitle]);
 
-  // Aspect ratio container styles
-  const aspectClass = useMemo(() => {
+  // Exact mathematical fit inside the stage container using size container units
+  const frameStyle = useMemo<React.CSSProperties>(() => {
+    if (isFullscreen) {
+      return { width: '100%', height: '100%' };
+    }
     if (aspectRatio === '9:16') {
-      return 'aspect-[9/16] w-full max-w-[340px] mx-auto';
+      return {
+        width: 'min(100cqw, calc(100cqh * 9 / 16))',
+        height: 'min(100cqh, calc(100cqw * 16 / 9))',
+      };
     }
     if (aspectRatio === '1:1') {
-      return 'aspect-square w-full max-w-[440px] mx-auto';
+      return {
+        width: 'min(100cqw, 100cqh)',
+        height: 'min(100cqw, 100cqh)',
+      };
     }
-    return 'aspect-video w-full shadow-2xl';
-  }, [aspectRatio]);
+    return {
+      width: 'min(100cqw, calc(100cqh * 16 / 9))',
+      height: 'min(100cqh, calc(100cqw * 9 / 16))',
+    };
+  }, [aspectRatio, isFullscreen]);
 
   return (
-    <div className="flex flex-col gap-2">
-      {/* Upper Monitor Bar: Source Info & Aspect Ratio Switcher */}
-      <div className="flex items-center justify-between text-xs px-0.5 text-neutral-500">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="font-semibold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5 truncate">
-            {style.isAudioMode ? (
-              <Radio className="w-3.5 h-3.5 text-pink-500 shrink-0" />
-            ) : (
-              <Video className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-            )}
-            <span className="truncate max-w-[200px] sm:max-w-xs text-xs">
-              {videoFileName || 'Proyecto de Video'}
-            </span>
+    <div className="flex flex-col h-full min-h-0 bg-white dark:bg-[#08090d]">
+      {/* Upper Monitor Header Bar (Fixed 40px) */}
+      <div className="h-10 px-3 border-b border-neutral-200 dark:border-neutral-800/90 bg-white dark:bg-[#0e1017] flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-2 min-w-0 text-xs">
+          {style.isAudioMode ? (
+            <Radio className="w-3.5 h-3.5 text-pink-500 shrink-0" />
+          ) : (
+            <Video className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+          )}
+          <span className="font-semibold text-neutral-800 dark:text-neutral-200 truncate max-w-[160px] sm:max-w-xs">
+            {videoFileName || 'Proyecto de Video'}
           </span>
-
           <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700 hidden sm:inline">·</span>
-
-          <span className="text-[11px] text-neutral-500 dark:text-neutral-400 hidden sm:inline">
-            {style.isAudioMode ? 'Puro Audio (60fps)' : 'Vista Previa'}
+          <span className="text-[11px] text-neutral-500 dark:text-neutral-400 hidden sm:inline shrink-0">
+            {style.isAudioMode ? 'Solo Audio (60fps)' : 'Monitor'}
           </span>
         </div>
 
-        {/* Aspect Ratio Switcher (16:9, 9:16 Reels, 1:1 Feed) */}
-        <div className="flex items-center bg-neutral-200/70 dark:bg-neutral-900 p-0.5 rounded-lg border border-neutral-300/60 dark:border-neutral-800">
-          <button
-            onClick={() => setAspectRatio('16:9')}
-            className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
-              aspectRatio === '16:9'
-                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-xs font-semibold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
-            }`}
-            title="Horizontal 16:9 (YouTube / Monitor)"
-          >
-            <Monitor className="w-3 h-3" />
-            <span>16:9</span>
-          </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Aspect Ratio Switcher */}
+          <div className="flex items-center bg-neutral-100 dark:bg-[#08090d] p-0.5 rounded-md border border-neutral-200 dark:border-neutral-800">
+            <button
+              onClick={() => setAspectRatio('16:9')}
+              className={`px-2 py-0.5 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
+                aspectRatio === '16:9'
+                  ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-xs font-semibold'
+                  : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
+              }`}
+              title="Horizontal 16:9"
+            >
+              <Monitor className="w-3 h-3" />
+              <span>16:9</span>
+            </button>
+
+            <button
+              onClick={() => setAspectRatio('9:16')}
+              className={`px-2 py-0.5 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
+                aspectRatio === '9:16'
+                  ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-xs font-semibold'
+                  : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
+              }`}
+              title="Vertical 9:16"
+            >
+              <Smartphone className="w-3 h-3 text-pink-500" />
+              <span>9:16</span>
+            </button>
+
+            <button
+              onClick={() => setAspectRatio('1:1')}
+              className={`px-2 py-0.5 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
+                aspectRatio === '1:1'
+                  ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-xs font-semibold'
+                  : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
+              }`}
+              title="Cuadrado 1:1"
+            >
+              <Square className="w-3 h-3" />
+              <span>1:1</span>
+            </button>
+          </div>
 
           <button
-            onClick={() => setAspectRatio('9:16')}
-            className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
-              aspectRatio === '9:16'
-                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-xs font-semibold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
-            }`}
-            title="Vertical 9:16 (TikTok / Reels / Shorts)"
+            onClick={onUploadNewVideo}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-md bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-700 transition-colors cursor-pointer"
+            title="Cambiar o importar video o audio"
           >
-            <Smartphone className="w-3 h-3 text-pink-500" />
-            <span>9:16</span>
-          </button>
-
-          <button
-            onClick={() => setAspectRatio('1:1')}
-            className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
-              aspectRatio === '1:1'
-                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-xs font-semibold'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
-            }`}
-            title="Cuadrado 1:1 (Post / Feed)"
-          >
-            <Square className="w-3 h-3" />
-            <span>1:1</span>
+            <Upload className="w-3 h-3 text-indigo-500" />
+            <span className="hidden sm:inline">Cambiar Media</span>
           </button>
         </div>
       </div>
 
-      {/* Main Video Monitor Bezel */}
-      <div
-        ref={containerRef}
-        onMouseMove={handleMouseMove}
-        className={`relative ${aspectClass} @container bg-neutral-950 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-center items-center group border border-neutral-200 dark:border-neutral-800 transition-all`}
-      >
-        {videoUrl ? (
-          <>
-            {/* Animated Canvas for Audio-Only Mode */}
-            {style.isAudioMode ? (
-              <canvas
-                ref={canvasRef}
-                onClick={onPlayPauseToggle}
-                className="w-full h-full object-cover cursor-pointer"
-              />
-            ) : null}
+      {/* Center Video Viewport Stage (Matte Studio Backdrop) */}
+      <div className="h-[260px] sm:h-[360px] lg:h-auto lg:flex-1 lg:min-h-0 w-full bg-[#050608] p-2 sm:p-3 flex items-center justify-center overflow-hidden">
+        <div
+          className="w-full h-full flex items-center justify-center"
+          style={{ containerType: 'size' }}
+        >
+          {/* Main Video Monitor Bezel */}
+          <div
+            ref={containerRef}
+            style={frameStyle}
+            className="relative @container bg-black rounded-lg overflow-hidden shadow-2xl flex flex-col justify-center items-center group border border-white/10"
+          >
+            {videoUrl ? (
+              <>
+                {style.isAudioMode ? (
+                  <canvas
+                    ref={canvasRef}
+                    onClick={onPlayPauseToggle}
+                    className="w-full h-full object-cover cursor-pointer"
+                  />
+                ) : null}
 
-            {/* Native Video Element */}
-            <video
-              ref={videoRef}
-              src={videoUrl}
-              onClick={onPlayPauseToggle}
-              onTimeUpdate={handleTimeUpdate}
-              onSeeked={handleTimeUpdate}
-              onLoadedMetadata={handleLoadedMetadata}
-              onEnded={() => onPlayPauseToggle()}
-              className={`w-full h-full object-contain cursor-pointer ${
-                style.isAudioMode ? 'hidden' : 'block'
-              }`}
-              playsInline
-            />
+                <video
+                  ref={videoRef}
+                  src={videoUrl}
+                  onClick={onPlayPauseToggle}
+                  onTimeUpdate={handleTimeUpdate}
+                  onSeeked={handleTimeUpdate}
+                  onLoadedMetadata={handleLoadedMetadata}
+                  onEnded={() => onPlayPauseToggle()}
+                  className={`w-full h-full object-contain cursor-pointer ${
+                    style.isAudioMode ? 'hidden' : 'block'
+                  }`}
+                  playsInline
+                />
 
-            {/* Live Subtitle Overlay with On-Screen Direct Editing */}
-            <div
-              className={`absolute pointer-events-auto flex justify-center px-6 z-20 transition-all duration-75 ${positionClass}`}
-              style={{
-                transform:
-                  style.position === 'bottom'
-                    ? `translateY(-${style.verticalOffset * 1.8}px)`
-                    : style.position === 'top'
-                    ? `translateY(${style.verticalOffset * 1.8}px)`
-                    : 'none',
-              }}
-            >
-              {activeCue && (
-                <div className="relative group/sub">
-                  {isEditingOnScreen ? (
-                    <div className="flex flex-col items-center gap-1.5 animate-in zoom-in-95 duration-100">
-                      <span className="text-[10px] font-bold text-amber-300 bg-black/90 backdrop-blur-md px-3 py-1 rounded-full border border-amber-400/40 shadow-md">
-                        ✏ Editando subtítulo en pantalla (Enter o haz clic fuera para guardar)
-                      </span>
-                      <textarea
-                        autoFocus
-                        rows={2}
-                        value={activeCue.text}
-                        onChange={(e) => onUpdateCue?.({ ...activeCue, text: e.target.value })}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            setIsEditingOnScreen(false);
-                          }
-                        }}
-                        onBlur={() => setIsEditingOnScreen(false)}
-                        style={overlayStyle as React.CSSProperties}
-                        className="max-w-[92vw] sm:max-w-[540px] leading-relaxed outline-none ring-2 ring-indigo-500 rounded-2xl resize-none shadow-2xl text-center bg-black/85"
-                      />
-                    </div>
-                  ) : (
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (isPlaying) onPlayPauseToggle();
-                        setIsEditingOnScreen(true);
-                      }}
-                      style={overlayStyle as React.CSSProperties}
-                      className="max-w-[92%] leading-relaxed select-none transition-all duration-75 drop-shadow-md inline-block animate-in fade-in zoom-in-95 duration-100 text-center cursor-pointer hover:ring-2 hover:ring-indigo-400/80 hover:scale-102 rounded-2xl p-1.5"
-                      title="Haz clic para editar el texto directamente sobre el video"
-                    >
-                      {activeCue.text}
-                      <span className="opacity-0 group-hover/sub:opacity-100 transition-opacity ml-2 text-[10px] text-indigo-300 font-mono font-bold">
-                        [✎ Editar]
-                      </span>
+                {/* Live Subtitle Overlay */}
+                <div
+                  className={`absolute pointer-events-auto flex justify-center px-6 z-20 transition-all duration-75 ${positionClass}`}
+                  style={{
+                    transform:
+                      style.position === 'bottom'
+                        ? `translateY(-${style.verticalOffset * 1.8}px)`
+                        : style.position === 'top'
+                        ? `translateY(${style.verticalOffset * 1.8}px)`
+                        : 'none',
+                  }}
+                >
+                  {activeCue && (
+                    <div className="relative group/sub">
+                      {isEditingOnScreen ? (
+                        <div className="flex flex-col items-center gap-1.5 animate-in zoom-in-95 duration-100">
+                          <span className="text-[10px] font-bold text-amber-300 bg-black/90 backdrop-blur-md px-3 py-1 rounded border border-amber-400/40 shadow-md">
+                            Editando en pantalla (Enter para guardar)
+                          </span>
+                          <textarea
+                            autoFocus
+                            rows={2}
+                            value={activeCue.text}
+                            onChange={(e) => onUpdateCue?.({ ...activeCue, text: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                setIsEditingOnScreen(false);
+                              }
+                            }}
+                            onBlur={() => setIsEditingOnScreen(false)}
+                            style={overlayStyle as React.CSSProperties}
+                            className="max-w-[92vw] sm:max-w-[540px] leading-relaxed outline-none ring-2 ring-indigo-500 rounded-xl resize-none shadow-2xl text-center bg-black/85"
+                          />
+                        </div>
+                      ) : (
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isPlaying) onPlayPauseToggle();
+                            setIsEditingOnScreen(true);
+                          }}
+                          style={overlayStyle as React.CSSProperties}
+                          className="max-w-[92%] leading-relaxed select-none transition-all duration-75 drop-shadow-md inline-block text-center cursor-pointer hover:ring-2 hover:ring-indigo-400/80 rounded-xl p-1.5"
+                          title="Haz clic para editar el texto directamente sobre el video"
+                        >
+                          {activeCue.text}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
+              </>
+            ) : (
+              /* Empty state */
+              <div className="flex flex-col items-center justify-center p-6 text-center max-w-sm mx-auto">
+                <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-3">
+                  <Upload className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-bold text-white mb-1">
+                  {videoFileName ? `Media: ${videoFileName}` : 'Carga un video o audio'}
+                </h3>
+                <p className="text-xs text-neutral-400 mb-4 leading-relaxed">
+                  {videoFileName
+                    ? 'Selecciona el archivo multimedia para previsualizar en tiempo real.'
+                    : 'Soporta MP4, WebM, MOV o audio con fondos animados 60fps.'}
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    onClick={onUploadNewVideo}
+                    className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Importar Media</span>
+                  </button>
+                  <button
+                    onClick={onLoadSampleVideo}
+                    className="px-3.5 py-1.5 text-xs font-medium rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 transition-colors cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Video className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Usar Demo</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Dedicated Docked Bottom Transport Bar (Never obscures subtitles) */}
+      <div className="shrink-0 bg-white dark:bg-[#0e1017] border-t border-neutral-200 dark:border-neutral-800/90 px-3 py-2 flex flex-col gap-1.5">
+        {/* Precision Scrubber */}
+        <input
+          type="range"
+          min={0}
+          max={duration || 100}
+          step={0.02}
+          value={currentTime}
+          onChange={handleSliderSeek}
+          disabled={!videoUrl}
+          className="w-full h-1 bg-neutral-200 dark:bg-neutral-800 rounded appearance-none cursor-pointer accent-indigo-500 disabled:opacity-40"
+        />
+
+        {/* Transport Controls Row */}
+        <div className="flex items-center justify-between text-xs">
+          {/* Left: Play/Pause, Step, Loop, Timecode */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={onPlayPauseToggle}
+              disabled={!videoUrl}
+              className="w-7 h-7 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-950 hover:opacity-90 flex items-center justify-center transition-all cursor-pointer disabled:opacity-40"
+              title={isPlaying ? 'Pausar (Espacio)' : 'Reproducir (Espacio)'}
+            >
+              {isPlaying ? (
+                <Pause className="w-3.5 h-3.5 fill-current" />
+              ) : (
+                <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
               )}
-            </div>
+            </button>
 
-            {/* Quick On-Video Header (Hover overlay) */}
-            <div
-              className={`absolute top-0 inset-x-0 p-3 bg-gradient-to-b from-black/80 via-black/20 to-transparent flex items-center justify-between z-30 transition-opacity duration-300 ${
-                showControls ? 'opacity-100' : 'opacity-0'
-              }`}
+            <button
+              onClick={() => handleStepFrame(-0.1)}
+              disabled={!videoUrl}
+              className="p-1.5 rounded text-neutral-600 dark:text-neutral-400 hover:text-neutral-950 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer disabled:opacity-40"
+              title="Retroceder 0.1s"
             >
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-medium text-white/90 drop-shadow-sm flex items-center gap-1.5 truncate max-w-[280px]">
-                  <Video className="w-3.5 h-3.5 text-white/70" />
-                  <span className="truncate">{videoFileName}</span>
-                </span>
-              </div>
+              <StepBack className="w-3.5 h-3.5" />
+            </button>
 
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={onUploadNewVideo}
-                  className="text-[11px] font-medium text-white/90 hover:text-white bg-black/40 hover:bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-md border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer"
-                  title="Cambiar archivo multimedia"
-                >
-                  <Upload className="w-3 h-3 text-white/80" />
-                  <span>Cambiar Video</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Transport & Playback Overlay (Bottom of Video) */}
-            <div
-              className={`absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/75 to-transparent p-3 sm:p-4 flex flex-col gap-2 z-30 transition-opacity duration-300 ${
-                showControls ? 'opacity-100' : 'opacity-0'
-              }`}
+            <button
+              onClick={() => handleStepFrame(0.1)}
+              disabled={!videoUrl}
+              className="p-1.5 rounded text-neutral-600 dark:text-neutral-400 hover:text-neutral-950 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer disabled:opacity-40"
+              title="Avanzar 0.1s"
             >
-              {/* Scrubber Range Input */}
-              <div className="relative flex items-center group/scrubber cursor-pointer">
-                <input
-                  type="range"
-                  min={0}
-                  max={duration || 100}
-                  step={0.02}
-                  value={currentTime}
-                  onChange={handleSliderSeek}
-                  className="w-full h-1.5 group-hover/scrubber:h-2 bg-white/20 rounded-lg appearance-none cursor-pointer accent-indigo-500 transition-all"
-                />
-              </div>
+              <StepForward className="w-3.5 h-3.5" />
+            </button>
 
-              {/* Bottom Transport Controls */}
-              <div className="flex items-center justify-between text-white text-xs mt-0.5">
-                {/* Left: Play/Pause, Frame steps, Timecode */}
-                <div className="flex items-center gap-1.5 sm:gap-2">
-                  <button
-                    onClick={onPlayPauseToggle}
-                    className="p-1.5 sm:p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
-                    title={isPlaying ? 'Pausar (Espacio)' : 'Reproducir (Espacio)'}
-                  >
-                    {isPlaying ? (
-                      <Pause className="w-4 h-4 fill-white" />
-                    ) : (
-                      <Play className="w-4 h-4 fill-white ml-0.5" />
-                    )}
-                  </button>
+            <button
+              onClick={() => setLoopCurrentCue(!loopCurrentCue)}
+              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer hidden xs:flex items-center gap-1 ${
+                loopCurrentCue
+                  ? 'bg-amber-400/20 text-amber-500 border border-amber-500/30 font-semibold'
+                  : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+              }`}
+              title="Repetir en bucle el bloque actual"
+            >
+              <Repeat className="w-3 h-3" />
+              <span>Bucle</span>
+            </button>
 
-                  {/* Step frame backward (-0.1s) */}
-                  <button
-                    onClick={() => handleStepFrame(-0.1)}
-                    className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/15 transition-colors cursor-pointer"
-                    title="Retroceder 1 cuadro (-0.1s)"
-                  >
-                    <StepBack className="w-3.5 h-3.5" />
-                  </button>
+            <div className="h-3.5 w-px bg-neutral-200 dark:bg-neutral-800 mx-1 hidden sm:block" />
 
-                  {/* Step frame forward (+0.1s) */}
-                  <button
-                    onClick={() => handleStepFrame(0.1)}
-                    className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/15 transition-colors cursor-pointer"
-                    title="Avanzar 1 cuadro (+0.1s)"
-                  >
-                    <StepForward className="w-3.5 h-3.5" />
-                  </button>
-
-                  {/* Loop cue toggle */}
-                  <button
-                    onClick={() => setLoopCurrentCue(!loopCurrentCue)}
-                    className={`p-1.5 rounded-lg transition-colors cursor-pointer hidden xs:flex items-center gap-1 ${
-                      loopCurrentCue
-                        ? 'bg-amber-400 text-neutral-950 font-bold'
-                        : 'text-white/80 hover:bg-white/15 hover:text-white'
-                    }`}
-                    title="Repetir en bucle el subtítulo actual"
-                  >
-                    <Repeat className="w-3.5 h-3.5" />
-                    <span className="text-[10px]">Bucle</span>
-                  </button>
-
-                  {/* Monospace Accurate Timecode */}
-                  <div className="text-xs font-mono text-white/90 tracking-wide select-none pl-1">
-                    <span className="font-bold text-white">
-                      {formatTimeDisplay(currentTime, true)}
-                    </span>
-                    <span className="text-white/40 mx-1">/</span>
-                    <span className="text-white/70">
-                      {formatTimeDisplay(duration, false)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Right: Sound, Playback Speed, Fullscreen */}
-                <div className="flex items-center gap-2 sm:gap-3">
-                  {/* Volume Slider */}
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => setIsMuted(!isMuted)}
-                      className="p-1 rounded text-white/80 hover:text-white transition-colors cursor-pointer"
-                    >
-                      {isMuted || volume === 0 ? (
-                        <VolumeX className="w-3.5 h-3.5" />
-                      ) : (
-                        <Volume2 className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={isMuted ? 0 : volume}
-                      onChange={(e) => {
-                        setVolume(parseFloat(e.target.value));
-                        if (isMuted) setIsMuted(false);
-                      }}
-                      className="w-12 sm:w-16 h-1 bg-white/20 rounded appearance-none cursor-pointer accent-indigo-500"
-                    />
-                  </div>
-
-                  {/* Speed Selector */}
-                  <select
-                    value={playbackRate}
-                    onChange={(e) => setPlaybackRate(parseFloat(e.target.value))}
-                    className="bg-white/10 hover:bg-white/20 text-white text-[11px] font-mono px-1.5 py-1 rounded border border-white/10 outline-none cursor-pointer"
-                  >
-                    <option value={0.5} className="bg-neutral-900 text-white">0.5x</option>
-                    <option value={0.75} className="bg-neutral-900 text-white">0.75x</option>
-                    <option value={1} className="bg-neutral-900 text-white">1x</option>
-                    <option value={1.25} className="bg-neutral-900 text-white">1.25x</option>
-                    <option value={1.5} className="bg-neutral-900 text-white">1.5x</option>
-                    <option value={2} className="bg-neutral-900 text-white">2x</option>
-                  </select>
-
-                  {/* Fullscreen */}
-                  <button
-                    onClick={toggleFullscreen}
-                    className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/15 transition-colors cursor-pointer"
-                    title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
-                  >
-                    {isFullscreen ? (
-                      <Minimize className="w-3.5 h-3.5" />
-                    ) : (
-                      <Maximize className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </>
-        ) : (
-          /* Empty state */
-          <div className="flex flex-col items-center justify-center p-8 text-center max-w-sm mx-auto">
-            <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-3 shadow-md">
-              <Upload className="w-7 h-7" />
-            </div>
-            <h3 className="text-base font-bold text-white mb-1">
-              {videoFileName ? `Video de Proyecto: ${videoFileName}` : 'Carga un video para subtitular'}
-            </h3>
-            <p className="text-xs text-neutral-400 mb-5 leading-relaxed">
-              {videoFileName
-                ? 'Sube el archivo de video/audio correspondiente para comenzar a editar o previsualizar.'
-                : 'Soporta MP4, WebM, MOV o puro audio con fondos animados en bucle.'}
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-2.5">
-              <button
-                onClick={onUploadNewVideo}
-                className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                <span>{videoFileName ? 'Seleccionar Video' : '+ Añadir Video'}</span>
-              </button>
-              <button
-                onClick={onLoadSampleVideo}
-                className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 transition-all cursor-pointer flex items-center gap-1.5"
-              >
-                <Video className="w-3.5 h-3.5 text-amber-400" />
-                <span>Usar Demo</span>
-              </button>
+            <div className="text-[11px] font-mono select-none">
+              <span className="font-semibold text-neutral-900 dark:text-white">
+                {formatTimeDisplay(currentTime, true)}
+              </span>
+              <span className="text-neutral-400 mx-1">/</span>
+              <span className="text-neutral-500">
+                {formatTimeDisplay(duration, false)}
+              </span>
             </div>
           </div>
-        )}
+
+          {/* Right: Volume, Speed, Fullscreen */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setIsMuted(!isMuted)}
+                className="p-1 rounded text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors cursor-pointer"
+                title={isMuted ? 'Activar sonido' : 'Silenciar'}
+              >
+                {isMuted || volume === 0 ? (
+                  <VolumeX className="w-3.5 h-3.5" />
+                ) : (
+                  <Volume2 className="w-3.5 h-3.5" />
+                )}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={isMuted ? 0 : volume}
+                onChange={(e) => {
+                  setVolume(parseFloat(e.target.value));
+                  if (isMuted) setIsMuted(false);
+                }}
+                className="w-12 sm:w-16 h-1 bg-neutral-200 dark:bg-neutral-800 rounded appearance-none cursor-pointer accent-indigo-500"
+              />
+            </div>
+
+            <select
+              value={playbackRate}
+              onChange={(e) => setPlaybackRate(parseFloat(e.target.value))}
+              className="bg-neutral-100 dark:bg-[#08090d] text-neutral-800 dark:text-neutral-200 text-[11px] font-mono px-1.5 py-0.5 rounded border border-neutral-200 dark:border-neutral-800 outline-none cursor-pointer"
+              title="Velocidad de reproducción"
+            >
+              <option value={0.5}>0.5x</option>
+              <option value={0.75}>0.75x</option>
+              <option value={1}>1x</option>
+              <option value={1.25}>1.25x</option>
+              <option value={1.5}>1.5x</option>
+              <option value={2}>2x</option>
+            </select>
+
+            <button
+              onClick={toggleFullscreen}
+              className="p-1.5 rounded text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+              title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+            >
+              {isFullscreen ? (
+                <Minimize className="w-3.5 h-3.5" />
+              ) : (
+                <Maximize className="w-3.5 h-3.5" />
+              )}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

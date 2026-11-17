@@ -14,10 +14,14 @@ import {
 } from './types/subtitle';
 import {
   saveProject,
-  getLocalCurrentProject,
+  restoreLastProject,
+  setCurrentProjectId,
 } from './services/projectService';
-import { saveMediaFile, getMediaFile } from './services/mediaStore';
-import { CheckCircle2 } from 'lucide-react';
+import {
+  saveAndSyncMediaFile,
+  resolveMediaFile,
+} from './services/mediaStore';
+import { CheckCircle2, Undo2, Redo2 } from 'lucide-react';
 import { parseSrt, ensureUniqueCueIds } from './utils/subtitleFormats';
 import {
   SAMPLE_VIDEO_URL,
@@ -27,6 +31,7 @@ import {
 
 // Components
 import { Navbar } from './components/Navbar';
+import { TranscriptPanel } from './components/TranscriptPanel';
 import { VideoPlayer } from './components/VideoPlayer';
 import { SubtitleTimeline } from './components/SubtitleTimeline';
 import { StudioInspector, StudioTab } from './components/StudioInspector';
@@ -45,9 +50,44 @@ import { BackgroundLoopModal } from './components/BackgroundLoopModal';
 import { StyleEditor } from './components/StyleEditor';
 import { AdminModal } from './components/AdminModal';
 
+interface HistorySnapshot {
+  subtitles: SubtitleCue[];
+  style: SubtitleStyle;
+  projectTitle: string;
+  selectedCueId: string | number | null;
+}
+
+const MAX_HISTORY_STEPS = 60;
+
+const cloneSnapshot = (snap: HistorySnapshot): HistorySnapshot => ({
+  subtitles: snap.subtitles.map((cue) => ({ ...cue })),
+  style: { ...snap.style },
+  projectTitle: snap.projectTitle,
+  selectedCueId: snap.selectedCueId,
+});
+
+const serializeHistoryState = (snap: Pick<HistorySnapshot, 'subtitles' | 'style' | 'projectTitle'>): string =>
+  JSON.stringify({
+    subtitles: snap.subtitles,
+    style: snap.style,
+    projectTitle: snap.projectTitle,
+  });
+
 export default function App() {
   // Navigation view: 'landing' (login & presentation), 'dashboard' (saved projects & new project), or 'studio' (editor)
-  const [currentView, setCurrentView] = useState<'landing' | 'dashboard' | 'studio'>('landing');
+  const [currentView, setCurrentView] = useState<'landing' | 'dashboard' | 'studio'>(() => {
+    const saved = sessionStorage.getItem('subcraft_current_view');
+    if (saved === 'studio' || saved === 'dashboard' || saved === 'landing') {
+      return saved;
+    }
+    return 'landing';
+  });
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('subcraft_current_view', currentView);
+    } catch {}
+  }, [currentView]);
 
   // Studio Inspector Tab: 'subtitles' | 'style' | 'loops' | 'ai'
   const [activeStudioTab, setActiveStudioTab] = useState<StudioTab>('subtitles');
@@ -106,6 +146,87 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isFirstRender = useRef<boolean>(true);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const savedMediaKeyRef = useRef<string>('');
+  const projectCreatedAtRef = useRef<string>(new Date().toISOString());
+
+  // Undo / Redo history stack
+  const historyRef = useRef<HistorySnapshot[]>([
+    cloneSnapshot({
+      subtitles,
+      style,
+      projectTitle,
+      selectedCueId,
+    }),
+  ]);
+  const historyIndexRef = useRef<number>(0);
+  const isRestoringHistoryRef = useRef<boolean>(false);
+  const historyDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const latestStateRef = useRef<HistorySnapshot>({
+    subtitles,
+    style,
+    projectTitle,
+    selectedCueId,
+  });
+  latestStateRef.current = { subtitles, style, projectTitle, selectedCueId };
+
+  const [canUndo, setCanUndo] = useState<boolean>(false);
+  const [canRedo, setCanRedo] = useState<boolean>(false);
+  const [historyToast, setHistoryToast] = useState<{ label: string; type: 'undo' | 'redo' } | null>(null);
+  const historyToastTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const showHistoryFeedback = useCallback((label: string, type: 'undo' | 'redo') => {
+    setHistoryToast({ label, type });
+    if (historyToastTimerRef.current) clearTimeout(historyToastTimerRef.current);
+    historyToastTimerRef.current = setTimeout(() => {
+      setHistoryToast(null);
+    }, 1800);
+  }, []);
+
+  const syncHistoryFlags = useCallback(() => {
+    const idx = historyIndexRef.current;
+    const len = historyRef.current.length;
+    const committed = idx >= 0 && idx < len ? historyRef.current[idx] : null;
+    const hasPendingDiff = committed
+      ? serializeHistoryState(latestStateRef.current) !== serializeHistoryState(committed)
+      : false;
+    setCanUndo(idx > 0 || hasPendingDiff);
+    setCanRedo(idx >= 0 && idx < len - 1);
+  }, []);
+
+  const resetHistory = useCallback((snap: HistorySnapshot) => {
+    if (historyDebounceRef.current) {
+      clearTimeout(historyDebounceRef.current);
+      historyDebounceRef.current = null;
+    }
+    isRestoringHistoryRef.current = true;
+    historyRef.current = [cloneSnapshot(snap)];
+    historyIndexRef.current = 0;
+    setCanUndo(false);
+    setCanRedo(false);
+    setTimeout(() => {
+      isRestoringHistoryRef.current = false;
+    }, 0);
+  }, []);
+
+  const commitHistorySnapshot = useCallback((snap: HistorySnapshot) => {
+    const currentIdx = historyIndexRef.current;
+    const currentCommitted = historyRef.current[currentIdx];
+    const nextSerialized = serializeHistoryState(snap);
+    if (currentCommitted && serializeHistoryState(currentCommitted) === nextSerialized) {
+      syncHistoryFlags();
+      return false;
+    }
+
+    const nextStack = historyRef.current.slice(0, currentIdx + 1);
+    nextStack.push(cloneSnapshot(snap));
+    if (nextStack.length > MAX_HISTORY_STEPS) {
+      nextStack.shift();
+    }
+    historyRef.current = nextStack;
+    historyIndexRef.current = nextStack.length - 1;
+    syncHistoryFlags();
+    return true;
+  }, [syncHistoryFlags]);
 
   // Sync dark mode class on document element
   useEffect(() => {
@@ -117,7 +238,7 @@ export default function App() {
     localStorage.setItem('subcraft_dark_mode', String(darkMode));
   }, [darkMode]);
 
-  // Firebase auth state observer & connection test
+  // Firebase auth state observer, connection test, and project + media restoration
   useEffect(() => {
     testConnection();
 
@@ -128,38 +249,70 @@ export default function App() {
       }
     });
 
-    // Restore cached project from local storage if available
-    const localProj = getLocalCurrentProject();
-    if (localProj && isFirstRender.current) {
-      setProjectId(localProj.id);
-      setProjectTitle(localProj.title || 'Mi Proyecto de Video');
-      if (localProj.subtitles && localProj.subtitles.length > 0) {
-        setSubtitles(ensureUniqueCueIds(localProj.subtitles));
-      }
-      if (localProj.style) {
-        setStyle(localProj.style);
-      }
-      if (localProj.language) setLanguage(localProj.language);
-      if (localProj.targetLanguage) setTargetLanguage(localProj.targetLanguage);
-      if (localProj.videoFileName) setVideoFileName(localProj.videoFileName);
+    let cancelled = false;
 
-      // Restore saved video/audio binary file from IndexedDB
-      getMediaFile(localProj.id).then((media) => {
-        if (media) {
-          const restoredUrl = URL.createObjectURL(media.blob);
-          setVideoUrl(restoredUrl);
-          setVideoFileName(media.fileName);
-          const restoredFile =
-            media.blob instanceof File
-              ? media.blob
-              : new File([media.blob], media.fileName, { type: media.fileType });
-          setVideoFile(restoredFile);
-        }
+    restoreLastProject().then(async (savedProj) => {
+      if (cancelled || !savedProj) return;
+
+      const restoredTitle = savedProj.title || 'Mi Proyecto de Video';
+      const restoredSubtitles =
+        savedProj.subtitles && savedProj.subtitles.length > 0
+          ? ensureUniqueCueIds(savedProj.subtitles)
+          : [];
+      const restoredStyle = savedProj.style || DEFAULT_STYLE;
+
+      setProjectId(savedProj.id);
+      setProjectTitle(restoredTitle);
+      projectCreatedAtRef.current = savedProj.createdAt || new Date().toISOString();
+      setSubtitles(restoredSubtitles);
+      if (savedProj.style) {
+        setStyle(restoredStyle);
+      }
+      if (savedProj.language) setLanguage(savedProj.language);
+      if (savedProj.targetLanguage) setTargetLanguage(savedProj.targetLanguage);
+      if (savedProj.videoDuration) setDuration(savedProj.videoDuration);
+      setVideoFileName(savedProj.videoFileName || '');
+
+      resetHistory({
+        subtitles: restoredSubtitles,
+        style: restoredStyle,
+        projectTitle: restoredTitle,
+        selectedCueId: restoredSubtitles.length > 0 ? restoredSubtitles[0].id : null,
       });
-    }
 
-    return () => unsubscribe();
-  }, []);
+      const isSample = savedProj.videoFileName === SAMPLE_VIDEO_NAME;
+      if (!isSample) {
+        // Prevent displaying sample video while custom media is loading
+        setVideoUrl(null);
+      }
+
+      // Restore saved video/audio binary from IndexedDB or backend backup
+      const media = await resolveMediaFile(savedProj.id);
+      if (cancelled) return;
+
+      if (media && media.blob) {
+        const restoredUrl = URL.createObjectURL(media.blob);
+        const restoredFile =
+          media.blob instanceof File
+            ? media.blob
+            : new File([media.blob], media.fileName || savedProj.videoFileName || 'media', {
+                type: media.fileType || 'video/mp4',
+              });
+        savedMediaKeyRef.current = `${savedProj.id}:${restoredFile.name}:${restoredFile.size}`;
+        setVideoUrl(restoredUrl);
+        setVideoFileName(media.fileName || savedProj.videoFileName || '');
+        setVideoFile(restoredFile);
+      } else if (isSample) {
+        setVideoUrl(SAMPLE_VIDEO_URL);
+        setVideoFileName(SAMPLE_VIDEO_NAME);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [resetHistory]);
 
   // Debounced auto-save function
   const triggerAutoSave = useCallback(() => {
@@ -183,21 +336,25 @@ export default function App() {
         targetLanguage,
         subtitles,
         style,
-        createdAt: new Date().toISOString(),
+        createdAt: projectCreatedAtRef.current,
         updatedAt: new Date().toISOString(),
       };
 
       try {
         await saveProject(projectPayload);
         if (videoFile) {
-          await saveMediaFile(projectId, videoFile, videoFileName);
+          const mediaKey = `${projectId}:${videoFile.name}:${videoFile.size}`;
+          if (savedMediaKeyRef.current !== mediaKey) {
+            await saveAndSyncMediaFile(projectId, videoFile, videoFileName || videoFile.name);
+            savedMediaKeyRef.current = mediaKey;
+          }
         }
         setSaveStatus(user || isAdminSession ? 'saved' : 'offline');
       } catch (err) {
         console.warn('Auto-save warning:', err);
         setSaveStatus(isAdminSession ? 'saved' : 'offline');
       }
-    }, 1200);
+    }, 800);
   }, [projectId, projectTitle, videoFileName, videoFile, duration, language, targetLanguage, subtitles, style, user, isAdminSession]);
 
   const [showSaveToast, setShowSaveToast] = useState<boolean>(false);
@@ -216,14 +373,15 @@ export default function App() {
       targetLanguage,
       subtitles,
       style,
-      createdAt: new Date().toISOString(),
+      createdAt: projectCreatedAtRef.current,
       updatedAt: new Date().toISOString(),
     };
 
     try {
       await saveProject(projectPayload);
       if (videoFile) {
-        await saveMediaFile(projectId, videoFile, videoFileName);
+        await saveAndSyncMediaFile(projectId, videoFile, videoFileName || videoFile.name);
+        savedMediaKeyRef.current = `${projectId}:${videoFile.name}:${videoFile.size}`;
       }
       setSaveStatus(user || isAdminSession ? 'saved' : 'offline');
       setShowSaveToast(true);
@@ -242,23 +400,215 @@ export default function App() {
       console.error('Sign out error:', err);
     }
     setUser(null);
+    try {
+      sessionStorage.removeItem('subcraft_current_view');
+    } catch {}
     setCurrentView('landing');
     setShowAuthModal(false);
   };
 
-  // Trigger auto-save whenever subtitles, styling, or title changes
+  // Trigger auto-save & coalesced Undo history tracking whenever subtitles, styling, or title changes
   useEffect(() => {
     triggerAutoSave();
-  }, [subtitles, style, projectTitle, language, targetLanguage, triggerAutoSave]);
 
-  // Global keyboard shortcuts (Space to Play/Pause, Arrow keys)
+    if (isRestoringHistoryRef.current) return;
+
+    const currentSnapshot: HistorySnapshot = {
+      subtitles,
+      style,
+      projectTitle,
+      selectedCueId: latestStateRef.current.selectedCueId,
+    };
+
+    const committed = historyRef.current[historyIndexRef.current];
+    if (!committed) {
+      historyRef.current = [cloneSnapshot(currentSnapshot)];
+      historyIndexRef.current = 0;
+      syncHistoryFlags();
+      return;
+    }
+
+    if (serializeHistoryState(currentSnapshot) !== serializeHistoryState(committed)) {
+      setCanUndo(true);
+      if (historyDebounceRef.current) {
+        clearTimeout(historyDebounceRef.current);
+      }
+      historyDebounceRef.current = setTimeout(() => {
+        historyDebounceRef.current = null;
+        if (!isRestoringHistoryRef.current) {
+          commitHistorySnapshot(latestStateRef.current);
+        }
+      }, 350);
+    }
+  }, [subtitles, style, projectTitle, language, targetLanguage, triggerAutoSave, commitHistorySnapshot, syncHistoryFlags]);
+
+  const applyRestoredSnapshot = useCallback((target: HistorySnapshot) => {
+    isRestoringHistoryRef.current = true;
+    const cloned = cloneSnapshot(target);
+    setSubtitles(cloned.subtitles);
+    setStyle(cloned.style);
+    setProjectTitle(cloned.projectTitle);
+
+    const hasPrevSelected =
+      cloned.selectedCueId !== null &&
+      cloned.subtitles.some((c) => String(c.id) === String(cloned.selectedCueId));
+    if (hasPrevSelected) {
+      setSelectedCueId(cloned.selectedCueId);
+    } else if (cloned.subtitles.length > 0) {
+      setSelectedCueId(cloned.subtitles[0].id);
+    } else {
+      setSelectedCueId(null);
+    }
+
+    setTimeout(() => {
+      isRestoringHistoryRef.current = false;
+      syncHistoryFlags();
+    }, 0);
+  }, [syncHistoryFlags]);
+
+  const handleUndo = useCallback(() => {
+    if (historyDebounceRef.current) {
+      clearTimeout(historyDebounceRef.current);
+      historyDebounceRef.current = null;
+    }
+
+    // Flush any uncommitted change before stepping back so it stays on the redo stack
+    const live = latestStateRef.current;
+    const currentCommitted = historyRef.current[historyIndexRef.current];
+    if (currentCommitted && serializeHistoryState(live) !== serializeHistoryState(currentCommitted)) {
+      commitHistorySnapshot(live);
+    }
+
+    if (historyIndexRef.current <= 0) {
+      syncHistoryFlags();
+      return;
+    }
+
+    historyIndexRef.current -= 1;
+    const target = historyRef.current[historyIndexRef.current];
+    applyRestoredSnapshot(target);
+    showHistoryFeedback('Cambio deshecho (Ctrl+Z)', 'undo');
+  }, [applyRestoredSnapshot, commitHistorySnapshot, showHistoryFeedback, syncHistoryFlags]);
+
+  const handleRedo = useCallback(() => {
+    if (historyDebounceRef.current) {
+      clearTimeout(historyDebounceRef.current);
+      historyDebounceRef.current = null;
+    }
+
+    if (historyIndexRef.current >= historyRef.current.length - 1) {
+      syncHistoryFlags();
+      return;
+    }
+
+    historyIndexRef.current += 1;
+    const target = historyRef.current[historyIndexRef.current];
+    applyRestoredSnapshot(target);
+    showHistoryFeedback('Cambio rehecho (Ctrl+Y)', 'redo');
+  }, [applyRestoredSnapshot, showHistoryFeedback, syncHistoryFlags]);
+
+  // Unified synchronization handlers for playhead & cue selection
+  const handleSelectCue = useCallback(
+    (id: string | number) => {
+      setSelectedCueId(id);
+      const cue = subtitles.find((c) => String(c.id) === String(id));
+      if (cue) {
+        setCurrentTime(cue.start + 0.01);
+        setIsPlaying(false);
+      }
+    },
+    [subtitles]
+  );
+
+  const handleSeek = useCallback(
+    (time: number) => {
+      const clamped = Math.max(0, Math.min(duration, time));
+      setCurrentTime(clamped);
+      const active = subtitles.find((c) => clamped >= c.start - 0.05 && clamped <= c.end + 0.05);
+      setSelectedCueId(active ? active.id : null);
+    },
+    [duration, subtitles]
+  );
+
+  const handleTimeUpdate = useCallback(
+    (time: number) => {
+      setCurrentTime(time);
+      if (isPlaying) {
+        const active = subtitles.find((c) => time >= c.start - 0.05 && time <= c.end + 0.05);
+        setSelectedCueId((prev) => {
+          const nextId = active ? active.id : null;
+          return prev === nextId ? prev : nextId;
+        });
+      }
+    },
+    [isPlaying, subtitles]
+  );
+
+  const handleDeleteCue = useCallback(
+    (id: string | number) => {
+      const idx = subtitles.findIndex((cue) => String(cue.id) === String(id));
+      const next = subtitles.filter((cue) => String(cue.id) !== String(id));
+      setSubtitles(next);
+
+      if (String(selectedCueId) === String(id)) {
+        if (next.length > 0) {
+          const fallbackIdx = Math.min(Math.max(0, idx), next.length - 1);
+          setSelectedCueId(next[fallbackIdx].id);
+        } else {
+          setSelectedCueId(null);
+        }
+      }
+    },
+    [subtitles, selectedCueId]
+  );
+
+  // Global keyboard shortcuts (Ctrl+Z / Cmd+Z Undo, Ctrl+Y / Cmd+Shift+Z Redo, Space, Arrow keys)
   useEffect(() => {
+    const hasOpenModal =
+      showCreateProjectModal ||
+      showGenerateModal ||
+      showExportModal ||
+      showProjectsModal ||
+      showAuthModal ||
+      showAddVideoModal ||
+      showTranslateModal ||
+      showAiPolishModal ||
+      showTimeShiftModal ||
+      showStyleModal ||
+      showBackgroundLoopModal ||
+      showAdminModal;
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      const activeTag = (document.activeElement?.tagName || '').toLowerCase();
+      const activeEl = document.activeElement as HTMLElement | null;
+      const activeTag = (activeEl?.tagName || '').toLowerCase();
+
+      // Handle Undo (Ctrl+Z / Cmd+Z) and Redo (Ctrl+Y / Cmd+Shift+Z) inside Studio
+      if (currentView === 'studio' && !hasOpenModal && (e.ctrlKey || e.metaKey) && !e.altKey) {
+        const keyLower = e.key.toLowerCase();
+        const isPasswordOrSearchInput =
+          activeEl?.getAttribute('type') === 'password' ||
+          activeEl?.getAttribute('data-no-global-undo') === 'true';
+
+        if (!isPasswordOrSearchInput && keyLower === 'z') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            handleRedo();
+          } else {
+            handleUndo();
+          }
+          return;
+        }
+        if (!isPasswordOrSearchInput && keyLower === 'y' && !e.shiftKey) {
+          e.preventDefault();
+          handleRedo();
+          return;
+        }
+      }
+
       if (
         activeTag === 'input' ||
         activeTag === 'textarea' ||
-        (document.activeElement as HTMLElement)?.isContentEditable
+        activeEl?.isContentEditable
       ) {
         return;
       }
@@ -268,19 +618,48 @@ export default function App() {
         setIsPlaying((prev) => !prev);
       } else if (e.code === 'ArrowLeft') {
         e.preventDefault();
-        setCurrentTime((prev) => Math.max(0, prev - 3));
+        handleSeek(currentTime - 3);
       } else if (e.code === 'ArrowRight') {
         e.preventDefault();
-        setCurrentTime((prev) => Math.min(duration, prev + 3));
+        handleSeek(currentTime + 3);
+      } else if (
+        currentView === 'studio' &&
+        !hasOpenModal &&
+        (e.key === 'Delete' || e.key === 'Backspace') &&
+        selectedCueId !== null &&
+        selectedCueId !== undefined
+      ) {
+        e.preventDefault();
+        handleDeleteCue(selectedCueId);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [duration]);
+  }, [
+    currentView,
+    currentTime,
+    selectedCueId,
+    handleSeek,
+    handleUndo,
+    handleRedo,
+    handleDeleteCue,
+    showCreateProjectModal,
+    showGenerateModal,
+    showExportModal,
+    showProjectsModal,
+    showAuthModal,
+    showAddVideoModal,
+    showTranslateModal,
+    showAiPolishModal,
+    showTimeShiftModal,
+    showStyleModal,
+    showBackgroundLoopModal,
+    showAdminModal,
+  ]);
 
-  // File upload handler
-  const handleSelectVideoFile = (file: File) => {
+  // File upload handler (persists media binary + project metadata immediately)
+  const handleSelectVideoFile = async (file: File) => {
     if (videoUrl && videoUrl !== SAMPLE_VIDEO_URL) {
       URL.revokeObjectURL(videoUrl);
     }
@@ -291,21 +670,44 @@ export default function App() {
     setCurrentTime(0);
     setIsPlaying(false);
 
-    // Save media file persistently in IndexedDB
-    saveMediaFile(projectId, file, file.name);
-
     const isAudio =
       file.type.startsWith('audio/') ||
       /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(file.name);
 
+    const updatedStyle: SubtitleStyle = isAudio
+      ? {
+          ...style,
+          isAudioMode: true,
+          backgroundLoop: style.backgroundLoop || 'aurora-gradient',
+        }
+      : style;
+
     if (isAudio) {
-      setStyle((prev) => ({
-        ...prev,
-        isAudioMode: true,
-        backgroundLoop: prev.backgroundLoop || 'aurora-gradient',
-      }));
+      setStyle(updatedStyle);
       setActiveStudioTab('loops');
     }
+
+    // Persist binary media immediately to IndexedDB & backend + update project record
+    setSaveStatus('saving');
+    savedMediaKeyRef.current = `${projectId}:${file.name}:${file.size}`;
+    await saveAndSyncMediaFile(projectId, file, file.name);
+
+    const activeUserId = user ? user.uid : (isAdminSession ? 'admin_jordas' : 'anonymous');
+    await saveProject({
+      id: projectId,
+      userId: activeUserId,
+      title: projectTitle,
+      videoFileName: file.name,
+      videoDuration: duration,
+      language,
+      targetLanguage,
+      subtitles,
+      style: updatedStyle,
+      createdAt: projectCreatedAtRef.current,
+      updatedAt: new Date().toISOString(),
+    }).catch((err) => console.warn('Immediate project save warning:', err));
+
+    setSaveStatus(user || isAdminSession ? 'saved' : 'offline');
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -316,12 +718,19 @@ export default function App() {
   };
 
   const handleLoadSampleVideo = () => {
+    const sampleCues = ensureUniqueCueIds(INITIAL_SAMPLE_SUBTITLES);
     setVideoFile(null);
     setVideoUrl(SAMPLE_VIDEO_URL);
     setVideoFileName(SAMPLE_VIDEO_NAME);
-    setSubtitles(INITIAL_SAMPLE_SUBTITLES);
+    setSubtitles(sampleCues);
     setCurrentTime(0);
     setIsPlaying(false);
+    resetHistory({
+      subtitles: sampleCues,
+      style,
+      projectTitle,
+      selectedCueId: sampleCues[0]?.id ?? null,
+    });
   };
 
   // Subtitle cue operations with automatic forward shifting of subsequent cues
@@ -329,10 +738,6 @@ export default function App() {
     setSubtitles((prev) =>
       prev.map((cue) => (cue.id === updatedCue.id ? updatedCue : cue))
     );
-  };
-
-  const handleDeleteCue = (id: string | number) => {
-    setSubtitles((prev) => prev.filter((cue) => cue.id !== id));
   };
 
   const handleAddCue = (newCue: SubtitleCue, index?: number) => {
@@ -414,8 +819,10 @@ export default function App() {
     });
   };
 
-  const handlePlaySpan = (start: number, end: number) => {
-    setCurrentTime(start);
+  const handlePlaySpan = (start: number, _end: number) => {
+    const active = subtitles.find((c) => start >= c.start - 0.05 && start <= c.end + 0.05);
+    if (active) setSelectedCueId(active.id);
+    setCurrentTime(start + 0.01);
     setIsPlaying(true);
   };
 
@@ -434,28 +841,34 @@ export default function App() {
   const handleSelectSavedProject = async (proj: SubtitleProject) => {
     try {
       setIsPlaying(false);
+      setCurrentProjectId(proj.id);
+      projectCreatedAtRef.current = proj.createdAt || new Date().toISOString();
 
       let restoredUrl: string | null = null;
       let restoredFile: File | null = null;
-      let fileName = proj.videoFileName || SAMPLE_VIDEO_NAME;
+      let fileName = proj.videoFileName || '';
 
-      // 1. Asynchronously retrieve saved video or audio file from IndexedDB BEFORE setting project state
+      // 1. Retrieve saved video or audio file from IndexedDB or backend server
       try {
-        const media = await getMediaFile(proj.id);
+        const media = await resolveMediaFile(proj.id);
         if (media && media.blob) {
           restoredUrl = URL.createObjectURL(media.blob);
-          fileName = media.fileName;
+          fileName = media.fileName || proj.videoFileName || 'media';
           restoredFile =
             media.blob instanceof File
               ? media.blob
-              : new File([media.blob], media.fileName, { type: media.fileType || 'video/mp4' });
-        } else if (proj.videoFileName === SAMPLE_VIDEO_NAME || !proj.videoFileName) {
+              : new File([media.blob], fileName, { type: media.fileType || 'video/mp4' });
+          savedMediaKeyRef.current = `${proj.id}:${restoredFile.name}:${restoredFile.size}`;
+        } else if (proj.videoFileName === SAMPLE_VIDEO_NAME) {
           restoredUrl = SAMPLE_VIDEO_URL;
           fileName = SAMPLE_VIDEO_NAME;
+          savedMediaKeyRef.current = '';
+        } else {
+          savedMediaKeyRef.current = '';
         }
       } catch (mediaErr) {
         console.warn('Media file restore warning:', mediaErr);
-        if (proj.videoFileName === SAMPLE_VIDEO_NAME || !proj.videoFileName) {
+        if (proj.videoFileName === SAMPLE_VIDEO_NAME) {
           restoredUrl = SAMPLE_VIDEO_URL;
           fileName = SAMPLE_VIDEO_NAME;
         }
@@ -467,19 +880,30 @@ export default function App() {
       }
 
       const loadedSubtitles = ensureUniqueCueIds(proj.subtitles || []);
+      const loadedTitle = proj.title || 'Mi Proyecto de Video';
+      const loadedStyle = proj.style || style;
+      const loadedSelectedId = loadedSubtitles.length > 0 ? loadedSubtitles[0].id : null;
 
-      // 2. Batch state updates together so auto-save sees restoredFile immediately
+      // 2. Batch state updates together so studio opens with restored media immediately
       setProjectId(proj.id);
-      setProjectTitle(proj.title || 'Mi Proyecto de Video');
+      setProjectTitle(loadedTitle);
       setSubtitles(loadedSubtitles);
       if (proj.style) setStyle(proj.style);
       if (proj.language) setLanguage(proj.language);
       if (proj.targetLanguage) setTargetLanguage(proj.targetLanguage);
+      if (proj.videoDuration) setDuration(proj.videoDuration);
       setVideoFileName(fileName);
       setVideoFile(restoredFile);
       setVideoUrl(restoredUrl);
-      setSelectedCueId(loadedSubtitles.length > 0 ? loadedSubtitles[0].id : null);
+      setSelectedCueId(loadedSelectedId);
       setCurrentTime(0);
+
+      resetHistory({
+        subtitles: loadedSubtitles,
+        style: loadedStyle,
+        projectTitle: loadedTitle,
+        selectedCueId: loadedSelectedId,
+      });
 
       // Save as active project in local storage
       try {
@@ -500,7 +924,7 @@ export default function App() {
     setShowCreateProjectModal(true);
   };
 
-  const handleCreateConfiguredProject = (data: {
+  const handleCreateConfiguredProject = async (data: {
     title: string;
     mediaFile: File | null;
     mediaUrl: string | null;
@@ -513,18 +937,29 @@ export default function App() {
     initialSubtitles?: any[];
   }) => {
     const newId = `proj_${Date.now()}`;
+    const nowIso = new Date().toISOString();
+    projectCreatedAtRef.current = nowIso;
+    setCurrentProjectId(newId);
+
+    const initialCues =
+      data.initialSubtitles && data.initialSubtitles.length > 0
+        ? ensureUniqueCueIds(data.initialSubtitles)
+        : [];
+    const nextStyle = data.style || style;
+    const nextTitle = data.title || 'Nuevo Proyecto';
+    const nextLang = data.language || language;
+    const nextDuration = data.duration || duration;
+
+    if (videoUrl && videoUrl !== SAMPLE_VIDEO_URL && videoUrl !== data.mediaUrl) {
+      URL.revokeObjectURL(videoUrl);
+    }
+
+    const initialSelectedId = initialCues.length > 0 ? initialCues[0].id : null;
     setProjectId(newId);
-    setProjectTitle(data.title || 'Nuevo Proyecto');
-    const initialCues = data.initialSubtitles && data.initialSubtitles.length > 0
-      ? ensureUniqueCueIds(data.initialSubtitles)
-      : [];
+    setProjectTitle(nextTitle);
     setSubtitles(initialCues);
-    if (data.style) {
-      setStyle(data.style);
-    }
-    if (data.language) {
-      setLanguage(data.language);
-    }
+    setStyle(nextStyle);
+    setLanguage(nextLang);
     setVideoFileName(data.mediaFileName || '');
     setVideoFile(data.mediaFile);
     setVideoUrl(data.mediaUrl);
@@ -533,15 +968,43 @@ export default function App() {
     }
     setCurrentTime(0);
     setIsPlaying(false);
-    setSelectedCueId(initialCues.length > 0 ? initialCues[0].id : null);
+    setSelectedCueId(initialSelectedId);
 
-    // Save media file to IndexedDB immediately if provided
-    if (data.mediaFile) {
-      saveMediaFile(newId, data.mediaFile, data.mediaFileName);
-    }
+    resetHistory({
+      subtitles: initialCues,
+      style: nextStyle,
+      projectTitle: nextTitle,
+      selectedCueId: initialSelectedId,
+    });
 
     setShowCreateProjectModal(false);
     setCurrentView('studio');
+
+    // Save media binary and project metadata immediately so it never disappears on reload
+    setSaveStatus('saving');
+    if (data.mediaFile) {
+      savedMediaKeyRef.current = `${newId}:${data.mediaFile.name}:${data.mediaFile.size}`;
+      await saveAndSyncMediaFile(newId, data.mediaFile, data.mediaFileName || data.mediaFile.name);
+    } else {
+      savedMediaKeyRef.current = '';
+    }
+
+    const activeUserId = user ? user.uid : (isAdminSession ? 'admin_jordas' : 'anonymous');
+    await saveProject({
+      id: newId,
+      userId: activeUserId,
+      title: nextTitle,
+      videoFileName: data.mediaFileName || '',
+      videoDuration: nextDuration,
+      language: nextLang,
+      targetLanguage: nextLang,
+      subtitles: initialCues,
+      style: nextStyle,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    }).catch((err) => console.warn('Initial project save warning:', err));
+
+    setSaveStatus(user || isAdminSession ? 'saved' : 'offline');
   };
 
   if (currentView === 'landing') {
@@ -625,7 +1088,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-100 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 flex flex-col font-sans transition-colors duration-200">
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-neutral-200 dark:bg-[#050608] text-neutral-900 dark:text-neutral-100 flex flex-col font-sans transition-colors duration-200">
       {/* Hidden file input for video upload */}
       <input
         ref={fileInputRef}
@@ -635,7 +1098,7 @@ export default function App() {
         onChange={handleFileInputChange}
       />
 
-      {/* Top Navbar */}
+      {/* Top Studio Header */}
       <Navbar
         projectTitle={projectTitle}
         onTitleChange={setProjectTitle}
@@ -652,92 +1115,21 @@ export default function App() {
         onSaveProject={handleManualSaveProject}
         onOpenExport={() => setShowExportModal(true)}
         onGoHome={() => setCurrentView(user || isAdmin ? 'dashboard' : 'landing')}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
       />
 
-      {/* Main Studio Workspace Grid */}
-      <main className="flex-1 w-full mx-auto px-3 sm:px-6 py-3 flex flex-col gap-3">
-        {/* Top Section: Video Preview (7 cols) & Single Subtitle Inspector (5 cols) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-start">
-          {/* Left Column: Video Player with Direct On-Screen Subtitle Editing (lg: 7 cols) */}
-          <div className="lg:col-span-7 flex flex-col gap-3">
-            <VideoPlayer
-              videoUrl={videoUrl}
-              videoFileName={videoFileName}
-              subtitles={subtitles}
-              selectedCueId={selectedCueId}
-              style={style}
-              currentTime={currentTime}
-              duration={duration}
-              isPlaying={isPlaying}
-              onTimeUpdate={(time) => {
-                setCurrentTime(time);
-                if (isPlaying) {
-                  const active = subtitles.find((c) => time >= c.start && time <= c.end);
-                  if (active) {
-                    setSelectedCueId(active.id);
-                  }
-                }
-              }}
-              onDurationChange={setDuration}
-              onPlayPauseToggle={() => setIsPlaying(!isPlaying)}
-              onSeek={(time) => {
-                setCurrentTime(time);
-                const active = subtitles.find((c) => time >= c.start && time <= c.end);
-                if (active) {
-                  setSelectedCueId(active.id);
-                }
-              }}
-              onUploadNewVideo={() => setShowAddVideoModal(true)}
-              onLoadSampleVideo={handleLoadSampleVideo}
-              onOpenBackgroundLoopModal={() => setActiveStudioTab('loops')}
-              onUpdateCue={handleUpdateCue}
-            />
-          </div>
-
-          {/* Right Column: Single Selected Subtitle Inspector (lg: 5 cols) */}
-          <div className="lg:col-span-5 flex flex-col h-full justify-between">
-            <StudioInspector
-              activeTab={activeStudioTab}
-              onChangeTab={setActiveStudioTab}
-              subtitles={subtitles}
-              selectedCueId={selectedCueId}
-              onSelectCue={setSelectedCueId}
-              currentTime={currentTime}
-              duration={duration}
-              style={style}
-              onChangeStyle={setStyle}
-              onUpdateCue={handleUpdateCue}
-              onDeleteCue={handleDeleteCue}
-              onAddCue={handleAddCue}
-              onMergeWithNext={handleMergeWithNext}
-              onSplitCue={handleSplitCue}
-              onSeek={(time) => {
-                setCurrentTime(time);
-                const active = subtitles.find((c) => time >= c.start && time <= c.end);
-                if (active) {
-                  setSelectedCueId(active.id);
-                }
-              }}
-              onPlaySpan={handlePlaySpan}
-              onImportSrt={handleImportSrt}
-              onOpenGenerate={() => setShowGenerateModal(true)}
-              onOpenExport={() => setShowExportModal(true)}
-              onApplyTimeShift={setSubtitles}
-              onRestoreSampleSubtitles={() => setSubtitles(ensureUniqueCueIds(INITIAL_SAMPLE_SUBTITLES))}
-            />
-          </div>
-        </div>
-
-        {/* Bottom Section: Full-Width Spaced Multitrack Visual Timeline (col-span-12) */}
-        <div className="w-full">
-          <SubtitleTimeline
+      {/* Fixed-Proportion Studio Grid Dashboard (Script | Monitor | Inspector + Bottom Docked Timeline) */}
+      <main className="flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-[270px_minmax(0,1fr)_370px] xl:grid-cols-[310px_minmax(0,1fr)_410px] lg:grid-rows-[minmax(0,1fr)_235px] xl:grid-rows-[minmax(0,1fr)_250px] gap-[1px] bg-neutral-200 dark:bg-neutral-800/80">
+        {/* Left Docked Panel: Cue Script & Search */}
+        <aside className="hidden lg:flex lg:flex-col min-h-0 bg-white dark:bg-[#0e1017] overflow-hidden">
+          <TranscriptPanel
             subtitles={subtitles}
-            duration={duration}
-            currentTime={currentTime}
             selectedCueId={selectedCueId}
-            onSeek={setCurrentTime}
-            onPause={() => setIsPlaying(false)}
-            onUpdateCue={handleUpdateCue}
+            currentTime={currentTime}
+            onSelectCue={handleSelectCue}
             onAddCueAtTime={(time) => {
               const newId = Date.now();
               handleAddCue({
@@ -747,17 +1139,91 @@ export default function App() {
                 text: 'Nuevo subtítulo...',
               });
               setSelectedCueId(newId);
+              setCurrentTime(Math.round(time * 100) / 100 + 0.01);
+              setIsPlaying(false);
             }}
-            onSelectCue={(id) => {
-              setSelectedCueId(id);
-              const cue = subtitles.find((c) => String(c.id) === String(id));
-              if (cue) {
-                setCurrentTime(cue.start);
-                setIsPlaying(false);
-              }
-            }}
+            onImportSrt={handleImportSrt}
           />
-        </div>
+        </aside>
+
+        {/* Center Stage: Video Monitor & Docked Transport */}
+        <section className="flex flex-col min-h-0 bg-white dark:bg-[#08090d] overflow-hidden">
+          <VideoPlayer
+            videoUrl={videoUrl}
+            videoFileName={videoFileName}
+            subtitles={subtitles}
+            selectedCueId={selectedCueId}
+            style={style}
+            currentTime={currentTime}
+            duration={duration}
+            isPlaying={isPlaying}
+            onTimeUpdate={handleTimeUpdate}
+            onDurationChange={setDuration}
+            onPlayPauseToggle={() => setIsPlaying(!isPlaying)}
+            onSeek={handleSeek}
+            onUploadNewVideo={() => setShowAddVideoModal(true)}
+            onLoadSampleVideo={handleLoadSampleVideo}
+            onOpenBackgroundLoopModal={() => setActiveStudioTab('loops')}
+            onUpdateCue={handleUpdateCue}
+          />
+        </section>
+
+        {/* Right Docked Panel: Precision Inspector */}
+        <aside className="flex flex-col min-h-0 bg-white dark:bg-[#0e1017] overflow-hidden">
+          <StudioInspector
+            activeTab={activeStudioTab}
+            onChangeTab={setActiveStudioTab}
+            subtitles={subtitles}
+            selectedCueId={selectedCueId}
+            onSelectCue={handleSelectCue}
+            currentTime={currentTime}
+            duration={duration}
+            style={style}
+            onChangeStyle={setStyle}
+            onUpdateCue={handleUpdateCue}
+            onDeleteCue={handleDeleteCue}
+            onAddCue={handleAddCue}
+            onMergeWithNext={handleMergeWithNext}
+            onSplitCue={handleSplitCue}
+            onSeek={handleSeek}
+            onPlaySpan={handlePlaySpan}
+            onImportSrt={handleImportSrt}
+            onOpenGenerate={() => setShowGenerateModal(true)}
+            onOpenExport={() => setShowExportModal(true)}
+            onApplyTimeShift={setSubtitles}
+            onRestoreSampleSubtitles={() => setSubtitles(ensureUniqueCueIds(INITIAL_SAMPLE_SUBTITLES))}
+            videoFile={videoFile}
+            videoUrl={videoUrl}
+            language={language}
+          />
+        </aside>
+
+        {/* Bottom Docked Multitrack Timeline */}
+        <section className="lg:col-span-3 min-h-[225px] lg:min-h-0 bg-white dark:bg-[#0b0c10] overflow-hidden flex flex-col">
+          <SubtitleTimeline
+            subtitles={subtitles}
+            duration={duration}
+            currentTime={currentTime}
+            selectedCueId={selectedCueId}
+            onSeek={handleSeek}
+            onPause={() => setIsPlaying(false)}
+            onUpdateCue={handleUpdateCue}
+            onDeleteCue={handleDeleteCue}
+            onAddCueAtTime={(time) => {
+              const newId = Date.now();
+              handleAddCue({
+                id: newId,
+                start: Math.round(time * 100) / 100,
+                end: Math.round((time + 2.5) * 100) / 100,
+                text: 'Nuevo subtítulo...',
+              });
+              setSelectedCueId(newId);
+              setCurrentTime(Math.round(time * 100) / 100 + 0.01);
+              setIsPlaying(false);
+            }}
+            onSelectCue={handleSelectCue}
+          />
+        </section>
       </main>
 
       {/* Heavy Flow Modals */}
@@ -896,6 +1362,18 @@ export default function App() {
         <div className="fixed bottom-6 right-6 z-50 bg-emerald-600 text-white font-bold text-xs px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2.5 animate-in fade-in slide-in-from-bottom-4">
           <CheckCircle2 className="w-5 h-5 text-emerald-200 shrink-0" />
           <span>¡Proyecto "{projectTitle}" guardado correctamente en Mis Proyectos!</span>
+        </div>
+      )}
+
+      {/* Subtle Undo/Redo Toast Feedback */}
+      {historyToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-neutral-900/95 dark:bg-neutral-100 text-white dark:text-neutral-950 font-semibold text-xs px-3.5 py-2 rounded-lg shadow-xl border border-neutral-800 dark:border-neutral-300 flex items-center gap-2 pointer-events-none">
+          {historyToast.type === 'undo' ? (
+            <Undo2 className="w-3.5 h-3.5 text-indigo-400 dark:text-indigo-600 shrink-0" />
+          ) : (
+            <Redo2 className="w-3.5 h-3.5 text-indigo-400 dark:text-indigo-600 shrink-0" />
+          )}
+          <span>{historyToast.label}</span>
         </div>
       )}
     </div>

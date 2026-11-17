@@ -14,6 +14,8 @@ import {
   ChevronLeft,
   FolderOpen,
   Plus,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -34,6 +36,10 @@ interface NavbarProps {
   onSaveProject: () => void;
   onOpenExport: () => void;
   onGoHome: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -52,6 +58,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSaveProject,
   onOpenExport,
   onGoHome,
+  canUndo = false,
+  canRedo = false,
+  onUndo,
+  onRedo,
 }) => {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(projectTitle);
@@ -90,8 +100,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   return (
-    <header className="h-12 border-b border-neutral-200/80 dark:border-neutral-800/90 bg-white dark:bg-[#0c0d12] transition-colors select-none sticky top-0 z-40">
-      <div className="max-w-[1920px] h-full mx-auto px-4 flex items-center justify-between gap-4">
+    <header className="h-12 border-b border-neutral-200/80 dark:border-neutral-800/90 bg-white dark:bg-[#0c0d12] transition-colors select-none sticky top-0 z-40 shrink-0">
+      <div className="w-full h-full px-4 flex items-center justify-between gap-4">
         
         {/* LEFT: Clean Brand & Project Identity */}
         <div className="flex items-center gap-3 min-w-0">
@@ -170,8 +180,33 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* RIGHT: Header Actions (Single Source of Truth) */}
-        <div className="flex items-center gap-2">
-          
+        <div className="flex items-center gap-1.5">
+          {/* Undo / Redo */}
+          {onUndo && onRedo && (
+            <div className="flex items-center gap-0.5 mr-0.5">
+              <button
+                type="button"
+                onClick={onUndo}
+                disabled={!canUndo}
+                className="p-1.5 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                title="Deshacer último cambio (Ctrl+Z)"
+                aria-label="Deshacer"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={onRedo}
+                disabled={!canRedo}
+                className="p-1.5 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                title="Rehacer cambio (Ctrl+Y)"
+                aria-label="Rehacer"
+              >
+                <Redo2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Save Button */}
           <button
             onClick={onSaveProject}

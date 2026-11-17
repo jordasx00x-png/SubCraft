@@ -33,6 +33,9 @@ import {
   Zap,
   Sparkles,
   Key,
+  AudioLines,
+  Loader2,
+  Undo2,
 } from 'lucide-react';
 import {
   SubtitleCue,
@@ -42,6 +45,7 @@ import {
   BackgroundLoopType,
 } from '../types/subtitle';
 import { formatTimeDisplay } from '../utils/subtitleFormats';
+import { runAutoAlignSubtitles } from '../services/autoAlignService';
 
 export type StudioTab = 'subtitles' | 'style' | 'loops' | 'tools';
 
@@ -67,6 +71,9 @@ interface StudioInspectorProps {
   onOpenExport: () => void;
   onApplyTimeShift: (cues: SubtitleCue[]) => void;
   onRestoreSampleSubtitles?: () => void;
+  videoFile?: File | null;
+  videoUrl?: string | null;
+  language?: string;
 }
 
 const FONT_OPTIONS = [
@@ -156,6 +163,9 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
   onOpenExport,
   onApplyTimeShift,
   onRestoreSampleSubtitles,
+  videoFile,
+  videoUrl,
+  language = 'es',
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showFullListModal, setShowFullListModal] = useState(false);
@@ -165,10 +175,72 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [groqKey, setGroqKey] = useState<string>(() => localStorage.getItem('subcraft_groq_api_key') || '');
 
+  // Auto-Align Subtitles state
+  const [isAligning, setIsAligning] = useState(false);
+  const [alignProgress, setAlignProgress] = useState(0);
+  const [alignStage, setAlignStage] = useState('');
+  const [alignError, setAlignError] = useState<string | null>(null);
+  const [alignReport, setAlignReport] = useState<{
+    adjustedCount: number;
+    averageShiftSeconds: number;
+    speechSegmentsCount: number;
+    summary: string;
+  } | null>(null);
+  const [previousCuesBackup, setPreviousCuesBackup] = useState<SubtitleCue[] | null>(null);
+
   const handleSaveGroqKey = (val: string) => {
     setGroqKey(val);
     localStorage.setItem('subcraft_groq_api_key', val.trim());
     setSuccessMsg('API Key de Groq guardada correctamente');
+    setTimeout(() => setSuccessMsg(null), 3000);
+  };
+
+  const handleAutoAlign = async () => {
+    if (isAligning || subtitles.length === 0) return;
+
+    setIsAligning(true);
+    setAlignError(null);
+    setAlignReport(null);
+    setAlignProgress(8);
+    setAlignStage('Iniciando análisis de la onda de audio...');
+
+    try {
+      const snapshotBefore = subtitles.map((c) => ({ ...c }));
+      const result = await runAutoAlignSubtitles({
+        subtitles,
+        videoFile,
+        videoUrl,
+        duration,
+        language,
+        onProgress: (pct, stage) => {
+          setAlignProgress(pct);
+          setAlignStage(stage);
+        },
+      });
+
+      setPreviousCuesBackup(snapshotBefore);
+      onApplyTimeShift(result.alignedSubtitles);
+      setAlignReport({
+        adjustedCount: result.adjustedCount,
+        averageShiftSeconds: result.averageShiftSeconds,
+        speechSegmentsCount: result.speechSegmentsCount,
+        summary: result.summary,
+      });
+      setSuccessMsg(`Auto-alineación completada (${result.adjustedCount} bloques ajustados)`);
+      setTimeout(() => setSuccessMsg(null), 4000);
+    } catch (err: any) {
+      setAlignError(err?.message || 'No se pudo completar la auto-alineación con IA.');
+    } finally {
+      setIsAligning(false);
+    }
+  };
+
+  const handleUndoAlign = () => {
+    if (!previousCuesBackup) return;
+    onApplyTimeShift(previousCuesBackup);
+    setPreviousCuesBackup(null);
+    setAlignReport(null);
+    setSuccessMsg('Se restauraron los tiempos originales anteriores al alineado.');
     setTimeout(() => setSuccessMsg(null), 3000);
   };
 
@@ -250,28 +322,27 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
   };
 
   return (
-    <div className="bg-white dark:bg-[#10121a] border border-neutral-200 dark:border-neutral-800/90 rounded-xl flex flex-col h-full shadow-sm overflow-hidden select-none">
-      {/* Sleek Segmented Tab Ribbon */}
-      <div className="p-1 bg-neutral-100 dark:bg-neutral-950/70 border-b border-neutral-200/80 dark:border-neutral-800/80 flex items-center gap-1">
+    <div className="bg-white dark:bg-[#0e1017] flex flex-col h-full min-h-0 overflow-hidden select-none">
+      {/* Docked 40px Tab Ribbon (Aligned horizontally with Script & Monitor Headers) */}
+      <div className="h-10 px-1.5 bg-neutral-50 dark:bg-[#0b0c10] border-b border-neutral-200 dark:border-neutral-800/90 flex items-center gap-1 shrink-0">
         <button
           onClick={() => onChangeTab('subtitles')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition-all cursor-pointer ${
             activeTab === 'subtitles'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-950 dark:text-white shadow-xs font-semibold'
+              ? 'bg-white dark:bg-[#151823] text-neutral-950 dark:text-white shadow-xs font-semibold border border-neutral-200/80 dark:border-neutral-800'
               : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
           }`}
-          title="Lista y edición de subtítulos"
+          title="Edición del bloque seleccionado"
         >
           <Subtitles className="w-3.5 h-3.5 text-indigo-500" />
-          <span className="truncate">Subtítulos</span>
-          <span className="text-[10px] text-neutral-600 dark:text-neutral-400 font-mono">({subtitles.length})</span>
+          <span className="truncate">Bloque</span>
         </button>
 
         <button
           onClick={() => onChangeTab('style')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition-all cursor-pointer ${
             activeTab === 'style'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-950 dark:text-white shadow-xs font-semibold'
+              ? 'bg-white dark:bg-[#151823] text-neutral-950 dark:text-white shadow-xs font-semibold border border-neutral-200/80 dark:border-neutral-800'
               : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
           }`}
           title="Tipografía y Estilos Visuales"
@@ -282,9 +353,9 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
 
         <button
           onClick={() => onChangeTab('loops')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition-all cursor-pointer ${
             activeTab === 'loops'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-950 dark:text-white shadow-xs font-semibold'
+              ? 'bg-white dark:bg-[#151823] text-neutral-950 dark:text-white shadow-xs font-semibold border border-neutral-200/80 dark:border-neutral-800'
               : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
           }`}
           title="Modo Audio y Fondos en Bucle"
@@ -298,9 +369,9 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
 
         <button
           onClick={() => onChangeTab('tools')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition-all cursor-pointer ${
             activeTab === 'tools'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-950 dark:text-white shadow-xs font-semibold'
+              ? 'bg-white dark:bg-[#151823] text-neutral-950 dark:text-white shadow-xs font-semibold border border-neutral-200/80 dark:border-neutral-800'
               : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
           }`}
           title="Subtítulos automáticos IA y ajustes de sincronización"
@@ -311,7 +382,7 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
       </div>
 
       {successMsg && (
-        <div className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 px-4 py-2 text-xs flex items-center gap-2 border-b border-emerald-200 dark:border-emerald-800">
+        <div className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 px-4 py-2 text-xs flex items-center gap-2 border-b border-emerald-200 dark:border-emerald-800 shrink-0">
           <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
           <span className="font-medium">{successMsg}</span>
         </div>
@@ -319,7 +390,7 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
 
       {/* TAB 1: SINGLE SELECTED SUBTITLE CUE INSPECTOR */}
       {activeTab === 'subtitles' && (
-        <div className="flex-1 flex flex-col min-h-0 bg-neutral-50/50 dark:bg-neutral-900/40 p-4 overflow-y-auto space-y-4">
+        <div className="flex-1 flex flex-col min-h-0 p-3.5 overflow-y-auto space-y-3">
           {subtitles.length === 0 ? (
             <div className="py-16 text-center text-neutral-400 text-xs">
               <Subtitles className="w-12 h-12 mx-auto text-indigo-500 mb-3 opacity-80" />
@@ -339,17 +410,16 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
           ) : selectedCue ? (
             <div className="space-y-3">
               {/* SECCIÓN A: Navegador y Posición del Bloque */}
-              <div className="p-2.5 bg-neutral-50/70 dark:bg-neutral-900/50 rounded-xl border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
+              <div className="p-2.5 bg-neutral-50 dark:bg-[#151823] rounded-lg border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
                 <button
                   disabled={selectedIndex <= 0}
                   onClick={() => {
                     const prev = subtitles[selectedIndex - 1];
                     if (prev) {
                       onSelectCue?.(prev.id);
-                      onSeek(prev.start);
                     }
                   }}
-                  className="px-2.5 py-1.5 rounded-lg text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800 disabled:opacity-30 cursor-pointer flex items-center gap-1 text-xs font-medium transition-colors"
+                  className="px-2.5 py-1 rounded-md text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800 disabled:opacity-30 cursor-pointer flex items-center gap-1 text-xs font-medium transition-colors"
                   title="Subtítulo anterior"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
@@ -371,10 +441,9 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                     const next = subtitles[selectedIndex + 1];
                     if (next) {
                       onSelectCue?.(next.id);
-                      onSeek(next.start);
                     }
                   }}
-                  className="px-2.5 py-1.5 rounded-lg text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800 disabled:opacity-30 cursor-pointer flex items-center gap-1 text-xs font-medium transition-colors"
+                  className="px-2.5 py-1 rounded-md text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/70 dark:hover:bg-neutral-800 disabled:opacity-30 cursor-pointer flex items-center gap-1 text-xs font-medium transition-colors"
                   title="Subtítulo siguiente"
                 >
                   <span>Siguiente</span>
@@ -537,8 +606,8 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                 </button>
               </div>
 
-              {/* SECCIÓN E: Accesos Directos SRT / Lista */}
-              <div className="pt-2 border-t border-neutral-200/80 dark:border-neutral-800/80 flex items-center justify-between text-xs text-neutral-500">
+              {/* SECCIÓN E: Accesos Directos SRT / Lista (Solo móvil/tablet donde la barra lateral izquierda está oculta) */}
+              <div className="lg:hidden pt-2 border-t border-neutral-200/80 dark:border-neutral-800/80 flex items-center justify-between text-xs text-neutral-500">
                 <button
                   onClick={() => setShowFullListModal(true)}
                   className="hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1.5 font-medium cursor-pointer"
@@ -607,7 +676,6 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                       <div
                         key={cue.id}
                         onClick={() => {
-                          onSeek(cue.start);
                           onSelectCue?.(cue.id);
                           setShowFullListModal(false);
                         }}
@@ -1063,6 +1131,82 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                 </button>
               )}
             </div>
+          </div>
+
+          {/* Auto-Align Subtitles (AI + Waveform Peak Analysis) */}
+          <div className="space-y-3 p-4 rounded-2xl border border-indigo-200 dark:border-indigo-800/70 bg-indigo-50/40 dark:bg-[#131624]">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h4 className="font-extrabold text-xs text-neutral-900 dark:text-neutral-100 flex items-center gap-2 uppercase tracking-wider">
+                  <AudioLines className="w-4 h-4 text-indigo-500" />
+                  <span>Auto-Align Subtitles</span>
+                </h4>
+                <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1 leading-relaxed">
+                  Analiza con IA los picos de energía de la onda de audio para ajustar automáticamente el inicio y fin de cada subtítulo al habla real.
+                </p>
+              </div>
+              {previousCuesBackup && !isAligning && (
+                <button
+                  type="button"
+                  onClick={handleUndoAlign}
+                  className="px-2 py-1 rounded-lg text-[11px] font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200/70 dark:hover:bg-neutral-800 flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
+                  title="Deshacer último auto-alineado"
+                >
+                  <Undo2 className="w-3 h-3" />
+                  <span>Deshacer</span>
+                </button>
+              )}
+            </div>
+
+            {isAligning && (
+              <div className="space-y-1.5 pt-0.5">
+                <div className="flex items-center justify-between text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
+                  <span className="truncate pr-2">{alignStage}</span>
+                  <span className="font-mono shrink-0">{alignProgress}%</span>
+                </div>
+                <div className="w-full h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
+                  <div
+                    className="h-full bg-indigo-600 dark:bg-indigo-400 transition-all duration-300"
+                    style={{ width: `${alignProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {alignReport && !isAligning && (
+              <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-[11px] text-emerald-700 dark:text-emerald-300 space-y-1">
+                <p className="font-semibold">{alignReport.summary}</p>
+                <p className="font-mono text-[10px] opacity-85">
+                  {alignReport.adjustedCount} bloques ajustados · {alignReport.speechSegmentsCount} picos de voz · Desfase medio {alignReport.averageShiftSeconds}s
+                </p>
+              </div>
+            )}
+
+            {alignError && (
+              <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-[11px] text-red-600 dark:text-red-400 flex items-start gap-2">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>{alignError}</span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleAutoAlign}
+              disabled={isAligning || subtitles.length === 0 || (!videoFile && !videoUrl)}
+              className="w-full py-2.5 px-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-45 text-white text-xs font-bold transition-all shadow-xs active:scale-98 cursor-pointer flex items-center justify-center gap-2"
+            >
+              {isAligning ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Analizando onda y alineando...</span>
+                </>
+              ) : (
+                <>
+                  <AudioLines className="w-3.5 h-3.5" />
+                  <span>Auto-Alinear {subtitles.length} Subtítulos</span>
+                </>
+              )}
+            </button>
           </div>
 
           {/* Time Shift Sincronizador */}

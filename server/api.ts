@@ -1,11 +1,162 @@
 import { Router, Request, Response } from 'express';
+import fs from 'fs';
+import path from 'path';
+import { Type } from '@google/genai';
 import { ai } from './gemini.ts';
 import { getYouTubeVideoInfo, streamYouTubeVideo } from './youtube.ts';
 
 export const apiRouter = Router();
 
+const MEDIA_DIR = path.resolve(process.cwd(), '.subcraft-media');
+
+function ensureMediaDir() {
+  if (!fs.existsSync(MEDIA_DIR)) {
+    fs.mkdirSync(MEDIA_DIR, { recursive: true });
+  }
+}
+
+function getSafeMediaPaths(projectId: string) {
+  const safeId = projectId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128) || 'default';
+  return {
+    binPath: path.join(MEDIA_DIR, `${safeId}.bin`),
+    tmpPath: path.join(MEDIA_DIR, `${safeId}.bin.tmp`),
+    metaPath: path.join(MEDIA_DIR, `${safeId}.meta.json`),
+  };
+}
+
 apiRouter.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', serverTime: new Date().toISOString() });
+});
+
+// Upload & persist project video/audio binary stream
+apiRouter.post('/media/:projectId', (req: Request, res: Response) => {
+  try {
+    ensureMediaDir();
+    const { projectId } = req.params;
+    const { binPath, tmpPath, metaPath } = getSafeMediaPaths(projectId);
+
+    const rawFileName = (req.headers['x-file-name'] as string) || 'media_file';
+    let fileName = rawFileName;
+    try {
+      fileName = decodeURIComponent(rawFileName);
+    } catch {
+      fileName = rawFileName;
+    }
+    const fileType = (req.headers['content-type'] as string) || 'video/mp4';
+
+    const writeStream = fs.createWriteStream(tmpPath);
+    let totalBytes = 0;
+
+    req.on('data', (chunk: Buffer) => {
+      totalBytes += chunk.length;
+    });
+
+    req.pipe(writeStream);
+
+    writeStream.on('finish', () => {
+      try {
+        fs.renameSync(tmpPath, binPath);
+        fs.writeFileSync(
+          metaPath,
+          JSON.stringify({
+            fileName,
+            fileType,
+            size: totalBytes,
+            updatedAt: Date.now(),
+          })
+        );
+        return res.json({
+          success: true,
+          projectId,
+          fileName,
+          fileType,
+          size: totalBytes,
+        });
+      } catch (err: any) {
+        console.error('Error finalizing media upload:', err);
+        return res.status(500).json({ success: false, error: err?.message || 'Error al guardar archivo multimedia' });
+      }
+    });
+
+    writeStream.on('error', (err) => {
+      console.error('Media write stream error:', err);
+      try {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+      } catch {}
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, error: 'Error al escribir archivo multimedia' });
+      }
+    });
+  } catch (error: any) {
+    console.error('Error in POST /api/media/:projectId:', error);
+    return res.status(500).json({ success: false, error: error?.message || 'Error interno al guardar media' });
+  }
+});
+
+// Check / fetch persisted project video or audio with HTTP Range support
+apiRouter.get('/media/:projectId', (req: Request, res: Response) => {
+  try {
+    const { projectId } = req.params;
+    const { binPath, metaPath } = getSafeMediaPaths(projectId);
+
+    if (!fs.existsSync(binPath)) {
+      return res.status(404).json({ success: false, error: 'Media no encontrada para este proyecto' });
+    }
+
+    let meta = { fileName: 'media_file', fileType: 'video/mp4' };
+    if (fs.existsSync(metaPath)) {
+      try {
+        meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+      } catch {}
+    }
+
+    const stat = fs.statSync(binPath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+
+    res.setHeader('X-Media-File-Name', encodeURIComponent(meta.fileName || 'media_file'));
+    res.setHeader('X-Media-File-Type', meta.fileType || 'video/mp4');
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunkSize = end - start + 1;
+
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunkSize,
+        'Content-Type': meta.fileType || 'video/mp4',
+      });
+      fs.createReadStream(binPath, { start, end }).pipe(res);
+    } else {
+      res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Content-Type': meta.fileType || 'video/mp4',
+      });
+      fs.createReadStream(binPath).pipe(res);
+    }
+  } catch (error: any) {
+    console.error('Error in GET /api/media/:projectId:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: error?.message || 'Error al leer media' });
+    }
+  }
+});
+
+// Delete persisted media when a project is deleted
+apiRouter.delete('/media/:projectId', (req: Request, res: Response) => {
+  try {
+    const { projectId } = req.params;
+    const { binPath, metaPath } = getSafeMediaPaths(projectId);
+    if (fs.existsSync(binPath)) fs.unlinkSync(binPath);
+    if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath);
+    return res.json({ success: true });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error?.message || 'Error eliminando media' });
+  }
 });
 
 // YouTube video info endpoint
@@ -304,6 +455,163 @@ Return strictly valid JSON:
     return res.status(500).json({
       success: false,
       error: error?.message || 'Failed to process subtitles with AI.',
+    });
+  }
+});
+
+interface AutoAlignCueInput {
+  id: string | number;
+  start: number;
+  end: number;
+  text: string;
+}
+
+interface SpeechBurstInput {
+  start: number;
+  end: number;
+  avgEnergy: number;
+  peakEnergy: number;
+}
+
+interface WaveformBucketInput {
+  t: number;
+  rms: number;
+  peak: number;
+}
+
+interface AutoAlignRequestBody {
+  subtitles: AutoAlignCueInput[];
+  duration: number;
+  language?: string;
+  speechSegments: SpeechBurstInput[];
+  waveformPeaks: WaveformBucketInput[];
+}
+
+apiRouter.post('/auto-align', async (req: Request, res: Response) => {
+  try {
+    const {
+      subtitles,
+      duration,
+      language = 'es',
+      speechSegments = [],
+      waveformPeaks = [],
+    } = req.body as AutoAlignRequestBody;
+
+    if (!subtitles || !Array.isArray(subtitles) || subtitles.length === 0) {
+      return res.status(400).json({ success: false, error: 'No subtitles provided for auto-alignment.' });
+    }
+
+    if (!Array.isArray(waveformPeaks) || waveformPeaks.length === 0) {
+      return res.status(400).json({ success: false, error: 'Audio waveform peaks are required for alignment.' });
+    }
+
+    const compactCues = subtitles.map((c) => ({
+      id: String(c.id),
+      start: Number(c.start.toFixed(2)),
+      end: Number(c.end.toFixed(2)),
+      words: (c.text || '').trim().split(/\s+/).filter(Boolean).length,
+      text: (c.text || '').slice(0, 120),
+    }));
+
+    const compactPeaks = waveformPeaks.map((p) => [
+      Number(p.t.toFixed(2)),
+      Math.round(p.rms),
+      Math.round(p.peak),
+    ]);
+
+    const compactSegments = speechSegments.map((s) => ({
+      start: Number(s.start.toFixed(2)),
+      end: Number(s.end.toFixed(2)),
+      avg: Math.round(s.avgEnergy),
+      peak: Math.round(s.peakEnergy),
+    }));
+
+    const prompt = `You are an expert audiovisual subtitle timing engineer.
+Your task is to synchronize existing subtitle cues to the real spoken audio by analyzing the extracted audio waveform peaks and detected speech segments.
+
+Project language: ${language}
+Total audio duration: ${Number(duration || 60).toFixed(2)} seconds.
+
+Detected active speech bursts (start, end in seconds, avg & peak energy 0-100):
+${JSON.stringify(compactSegments)}
+
+Waveform energy timeline as [time_sec, rms_0_to_100, peak_0_to_100]:
+${JSON.stringify(compactPeaks)}
+
+Existing subtitle cues to align (keep the exact same "id" values in the exact same chronological order):
+${JSON.stringify(compactCues)}
+
+Alignment Rules:
+1. Match each subtitle cue to the corresponding speech activity / waveform peak burst in chronological order.
+2. Snap "start" to when speech energy begins rising for that phrase (the onset of the matching burst or peak), and snap "end" to when the phrase finishes before silence or the next phrase.
+3. When multiple consecutive cues fall inside one continuous speech burst, distribute their durations proportionally to their word count ("words") and natural speaking pace, anchored to local waveform dips/peaks inside that burst.
+4. Keep strict chronological order with zero overlaps: cue[i].start < cue[i].end <= cue[i+1].start <= ${Number(duration || 60).toFixed(2)}.
+5. Minimum cue duration is 0.40s unless the surrounding speech gap is smaller.
+6. Never drop, reorder, or merge cues — return exactly one aligned timing object for every input cue "id".
+7. Provide a concise 1-sentence "summary" in Spanish describing the alignment result.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-4-hydrogen',
+      contents: prompt,
+      config: {
+        systemInstruction:
+          'You align subtitle start/end timestamps to speech waveform peaks with frame-level precision. Return strictly valid JSON matching the schema.',
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            summary: {
+              type: Type.STRING,
+              description: 'Brief 1-sentence summary in Spanish of the alignment adjustment.',
+            },
+            alignedCues: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: {
+                    type: Type.STRING,
+                    description: 'Exact original cue id.',
+                  },
+                  start: {
+                    type: Type.NUMBER,
+                    description: 'Aligned start timestamp in seconds.',
+                  },
+                  end: {
+                    type: Type.NUMBER,
+                    description: 'Aligned end timestamp in seconds.',
+                  },
+                },
+                required: ['id', 'start', 'end'],
+              },
+            },
+          },
+          required: ['summary', 'alignedCues'],
+        },
+      },
+    });
+
+    const outputText = (response.text ?? '{}').trim();
+    const cleaned = outputText.replace(/^```json\s*/gm, '').replace(/```\s*$/gm, '').trim();
+    const parsed = JSON.parse(cleaned);
+
+    if (!parsed || !Array.isArray(parsed.alignedCues)) {
+      return res.status(502).json({
+        success: false,
+        error: 'La respuesta del modelo de IA no incluyó bloques alineados válidos.',
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: parsed,
+    });
+  } catch (error: any) {
+    console.error('Error in /api/auto-align:', error);
+    const statusCode = typeof error?.status === 'number' ? error.status : 500;
+    return res.status(statusCode).json({
+      success: false,
+      error: error?.message || 'Error al alinear subtítulos con la onda de audio en IA.',
     });
   }
 });

@@ -8,6 +8,7 @@ import {
   SkipBack,
   SkipForward,
   MoveHorizontal,
+  Trash2,
 } from 'lucide-react';
 import { formatTimeDisplay } from '../utils/subtitleFormats';
 
@@ -20,6 +21,7 @@ interface SubtitleTimelineProps {
   onAddCueAtTime: (time: number) => void;
   onSelectCue: (cueId: string | number) => void;
   onUpdateCue: (cue: SubtitleCue) => void;
+  onDeleteCue?: (cueId: string | number) => void;
   onPause?: () => void;
 }
 
@@ -32,6 +34,7 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   onAddCueAtTime,
   onSelectCue,
   onUpdateCue,
+  onDeleteCue,
   onPause,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -45,6 +48,15 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   const [initialCueTimes, setInitialCueTimes] = useState<{ start: number; end: number } | null>(null);
 
   const safeDuration = duration > 0 ? duration : 60;
+
+  const selectedCueIndex = useMemo(
+    () =>
+      selectedCueId !== null && selectedCueId !== undefined
+        ? subtitles.findIndex((c) => String(c.id) === String(selectedCueId))
+        : -1,
+    [subtitles, selectedCueId]
+  );
+  const selectedCue = selectedCueIndex >= 0 ? subtitles[selectedCueIndex] : null;
 
   // Waveform bars
   const waveformBars = useMemo(() => {
@@ -77,27 +89,23 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   const handlePrevCue = () => {
     const prev = [...subtitles].reverse().find((c) => c.start < currentTime - 0.2);
     if (prev) {
-      onSeek(prev.start);
-      onPause?.();
+      onSelectCue(prev.id);
     } else if (subtitles.length > 0) {
-      onSeek(subtitles[0].start);
-      onPause?.();
+      onSelectCue(subtitles[0].id);
     }
   };
 
   const handleNextCue = () => {
     const next = subtitles.find((c) => c.start > currentTime + 0.2);
     if (next) {
-      onSeek(next.start);
-      onPause?.();
+      onSelectCue(next.id);
     } else if (subtitles.length > 0) {
-      onSeek(subtitles[subtitles.length - 1].start);
-      onPause?.();
+      onSelectCue(subtitles[subtitles.length - 1].id);
     }
   };
 
   const handleTrackClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!trackRef.current || duration <= 0) return;
+    if (!trackRef.current || safeDuration <= 0) return;
     const rect = trackRef.current.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const pct = Math.max(0, Math.min(1, clickX / rect.width));
@@ -116,8 +124,6 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
     setDragStartX(e.clientX);
     setInitialCueTimes({ start: cue.start, end: cue.end });
     onSelectCue(cue.id);
-    onSeek(cue.start);
-    onPause?.();
   };
 
   useEffect(() => {
@@ -168,9 +174,9 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   const playheadPercent = Math.min(100, Math.max(0, (currentTime / safeDuration) * 100));
 
   return (
-    <div className="bg-white dark:bg-[#10121a] border border-neutral-200 dark:border-neutral-800/90 rounded-xl p-3 sm:p-3.5 shadow-xs select-none flex flex-col gap-2.5">
-      {/* Top Timeline Toolbar */}
-      <div className="flex items-center justify-between text-xs">
+    <div className="bg-white dark:bg-[#0b0c10] h-full min-h-0 flex flex-col select-none">
+      {/* Top Timeline Toolbar (36px) */}
+      <div className="h-9 px-3 border-b border-neutral-200 dark:border-neutral-800/90 flex items-center justify-between text-xs shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="flex items-center gap-1.5 text-neutral-900 dark:text-white font-semibold">
             <Clock className="w-3.5 h-3.5 text-indigo-500" />
@@ -183,17 +189,17 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             {subtitles.length} bloques
           </span>
 
-          <div className="flex items-center bg-neutral-100 dark:bg-neutral-800/80 p-0.5 rounded-md border border-neutral-200 dark:border-neutral-700 ml-1">
+          <div className="flex items-center bg-neutral-100 dark:bg-neutral-900 p-0.5 rounded border border-neutral-200 dark:border-neutral-800 ml-1">
             <button
               onClick={handlePrevCue}
-              className="p-1 hover:text-indigo-600 dark:hover:text-indigo-400 rounded transition-colors cursor-pointer"
+              className="p-1 hover:text-indigo-500 rounded transition-colors cursor-pointer"
               title="Subtítulo anterior"
             >
               <SkipBack className="w-3 h-3" />
             </button>
             <button
               onClick={handleNextCue}
-              className="p-1 hover:text-indigo-600 dark:hover:text-indigo-400 rounded transition-colors cursor-pointer"
+              className="p-1 hover:text-indigo-500 rounded transition-colors cursor-pointer"
               title="Subtítulo siguiente"
             >
               <SkipForward className="w-3 h-3" />
@@ -202,7 +208,7 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex items-center bg-neutral-100 dark:bg-neutral-800/80 px-1 py-0.5 rounded-md border border-neutral-200 dark:border-neutral-700">
+          <div className="flex items-center bg-neutral-100 dark:bg-neutral-900 px-1 py-0.5 rounded border border-neutral-200 dark:border-neutral-800">
             <button
               onClick={() => setZoomLevel((z) => Math.max(1, z / 2))}
               disabled={zoomLevel <= 1}
@@ -224,35 +230,47 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             </button>
           </div>
 
+          {selectedCue && onDeleteCue && (
+            <button
+              type="button"
+              onClick={() => onDeleteCue(selectedCue.id)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-md bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/25 hover:bg-red-600 hover:text-white transition-colors cursor-pointer"
+              title={`Eliminar bloque #${selectedCueIndex + 1} (Supr)`}
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>Eliminar #{selectedCueIndex + 1}</span>
+            </button>
+          )}
+
           <button
             onClick={() => onAddCueAtTime(currentTime)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-md bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer"
             title="Añadir subtítulo en el tiempo actual"
           >
             <Plus className="w-3 h-3" />
-            <span>+ Bloque en {formatTimeDisplay(currentTime, false)}</span>
+            <span>Bloque en {formatTimeDisplay(currentTime, false)}</span>
           </button>
         </div>
       </div>
 
-      {/* Main Multi-Track Scroll Area */}
+      {/* Main Multi-Track Scroll Area (Flex 1 fills height) */}
       <div
         ref={scrollContainerRef}
-        className="w-full overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-950 shadow-inner relative custom-scrollbar"
+        className="flex-1 min-h-[135px] w-full overflow-x-auto overflow-y-hidden bg-[#06070a] relative custom-scrollbar"
       >
         <div
           ref={trackRef}
           onClick={handleTrackClick}
           style={{ width: `${zoomLevel * 100}%` }}
-          className="relative h-40 cursor-pointer select-none transition-all duration-150"
+          className="relative h-full flex flex-col cursor-pointer select-none transition-all duration-150"
         >
           {/* TRACK 0: Time Ruler Header */}
-          <div className="h-6 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-2 text-[10px] font-mono text-neutral-400 select-none">
+          <div className="h-5 bg-[#0e1017] border-b border-neutral-800/90 flex items-center justify-between px-2 text-[10px] font-mono text-neutral-500 select-none shrink-0">
             {Array.from({ length: 11 }).map((_, i) => {
               const timeSec = (i / 10) * safeDuration;
               return (
                 <div key={i} className="flex flex-col items-center">
-                  <div className="h-2 w-px bg-neutral-700 mb-0.5" />
+                  <div className="h-1.5 w-px bg-neutral-700" />
                   <span>{formatTimeDisplay(timeSec, false)}</span>
                 </div>
               );
@@ -260,18 +278,18 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
           </div>
 
           {/* TRACK 1: Audio Waveform */}
-          <div className="h-14 px-1 flex items-center justify-between gap-[1px] bg-neutral-950/90 border-b border-neutral-800/80 pointer-events-none opacity-85">
+          <div className="h-10 px-1 flex items-center justify-between gap-[1px] bg-[#08090d] border-b border-neutral-800/60 pointer-events-none opacity-80 shrink-0">
             {waveformBars.map((heightPct, idx) => (
               <div
                 key={idx}
                 style={{ height: `${heightPct}%` }}
-                className="flex-1 bg-indigo-500/50 rounded-full"
+                className="flex-1 bg-indigo-500/45 rounded-full"
               />
             ))}
           </div>
 
           {/* TRACK 2: Draggable & Resizable Subtitle Cue Blocks */}
-          <div className="relative h-20 p-1.5">
+          <div className="relative flex-1 min-h-[58px] p-1.5">
             {subtitles.map((cue, idx) => {
               const leftPct = Math.min(100, Math.max(0, (cue.start / safeDuration) * 100));
               const widthPct = Math.min(
@@ -290,30 +308,47 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
                     left: `${leftPct}%`,
                     width: `${widthPct}%`,
                   }}
-                  className={`absolute top-1 bottom-1 rounded-lg border text-[11px] font-semibold px-2 flex items-center justify-between overflow-hidden cursor-grab active:cursor-grabbing transition-colors ${
+                  className={`absolute top-1.5 bottom-1.5 rounded-md border text-[11px] font-medium px-2 flex items-center justify-between overflow-hidden cursor-grab active:cursor-grabbing transition-colors ${
                     isActive
-                      ? 'bg-amber-400 border-amber-300 text-neutral-950 font-black shadow-lg z-10 ring-2 ring-amber-400/60'
-                      : 'bg-indigo-600/40 border-indigo-400/50 text-indigo-100 hover:bg-indigo-600/60'
+                      ? 'bg-amber-400 border-amber-300 text-neutral-950 font-bold shadow-lg z-10 ring-1 ring-amber-300'
+                      : 'bg-indigo-600/35 border-indigo-400/40 text-indigo-100 hover:bg-indigo-600/55'
                   }`}
-                  title={`[${formatTimeDisplay(cue.start, true)} - ${formatTimeDisplay(cue.end, true)}] ${cue.text} (Arrastra para mover o redimensionar bordes)`}
+                  title={`[${formatTimeDisplay(cue.start, true)} - ${formatTimeDisplay(cue.end, true)}] ${cue.text}`}
                 >
                   {/* Left Resize Handle */}
                   <div
                     onMouseDown={(e) => handleMouseDownCue(e, cue, 'resize-left')}
-                    className="absolute left-0 top-0 bottom-0 w-2 bg-white/30 hover:bg-white cursor-ew-resize rounded-l z-20"
-                    title="Arrastra para alargar/achicar inicio"
+                    className="absolute left-0 top-0 bottom-0 w-1.5 bg-white/25 hover:bg-white cursor-ew-resize rounded-l z-20"
+                    title="Arrastra para ajustar inicio"
                   />
 
-                  <div className="flex items-center gap-1 truncate pointer-events-none px-1">
-                    <span className="font-mono text-[9px] opacity-70">#{idx + 1}</span>
+                  <div className="flex items-center gap-1 truncate pointer-events-none px-1 min-w-0">
+                    <span className="font-mono text-[9px] opacity-75 shrink-0">#{idx + 1}</span>
                     <span className="truncate">{cue.text}</span>
                   </div>
+
+                  {/* Inline Delete button on selected block (when wide enough) */}
+                  {isSelected && onDeleteCue && (
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteCue(cue.id);
+                      }}
+                      className="relative z-20 ml-1 mr-1 p-0.5 rounded bg-neutral-950/20 hover:bg-red-600 text-neutral-950 hover:text-white transition-colors cursor-pointer shrink-0"
+                      title={`Eliminar bloque #${idx + 1} (Supr)`}
+                      aria-label={`Eliminar bloque ${idx + 1}`}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  )}
 
                   {/* Right Resize Handle */}
                   <div
                     onMouseDown={(e) => handleMouseDownCue(e, cue, 'resize-right')}
-                    className="absolute right-0 top-0 bottom-0 w-2 bg-white/30 hover:bg-white cursor-ew-resize rounded-r z-20"
-                    title="Arrastra para alargar/achacar fin"
+                    className="absolute right-0 top-0 bottom-0 w-1.5 bg-white/25 hover:bg-white cursor-ew-resize rounded-r z-20"
+                    title="Arrastra para ajustar fin"
                   />
                 </div>
               );
@@ -325,18 +360,18 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             style={{ left: `${playheadPercent}%` }}
             className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none z-30 shadow-md flex flex-col items-center"
           >
-            <div className="bg-red-500 text-white font-mono text-[9px] px-1 py-0.5 rounded-b -mt-0.5 shadow-md font-bold tracking-tight">
+            <div className="bg-red-500 text-white font-mono text-[9px] px-1 py-0.5 rounded-b shadow-md font-bold tracking-tight">
               <span>{formatTimeDisplay(currentTime, true)}</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Interactive Global Navigation Bar */}
-      <div className="flex items-center gap-3 bg-neutral-50 dark:bg-[#0c0d12] px-3 py-2 rounded-lg border border-neutral-200/80 dark:border-neutral-800">
+      {/* Bottom Scrubber & Status Bar (34px) */}
+      <div className="h-8 px-3 border-t border-neutral-200 dark:border-neutral-800/90 bg-neutral-50 dark:bg-[#0e1017] flex items-center gap-3 shrink-0">
         <span className="text-[11px] font-medium text-neutral-500 shrink-0 flex items-center gap-1.5">
           <MoveHorizontal className="w-3.5 h-3.5 text-indigo-500" />
-          <span>Posición global:</span>
+          <span className="hidden sm:inline">Navegador:</span>
         </span>
 
         <input
@@ -350,23 +385,17 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             onSeek(targetTime);
             onPause?.();
           }}
-          className="w-full h-1.5 bg-neutral-200 dark:bg-neutral-800 rounded appearance-none cursor-pointer accent-indigo-500"
+          className="w-full h-1 bg-neutral-200 dark:bg-neutral-800 rounded appearance-none cursor-pointer accent-indigo-500"
           title="Desliza para desplazarte por la pista"
         />
 
-        <span className="text-xs font-mono font-medium text-neutral-900 dark:text-neutral-100 shrink-0">
-          {formatTimeDisplay(currentTime, true)}
-        </span>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between text-[11px] text-neutral-500 dark:text-neutral-400 px-1 pt-0.5">
-        <div className="flex items-center gap-3">
-          <span>💡 Arrastra los bordes de los bloques para cambiar su duración</span>
-          <span>🖱️ Usa la barra de navegación para desplazarte libremente</span>
+        <div className="flex items-center gap-2 shrink-0 text-[11px] font-mono text-neutral-500">
+          <span className="font-semibold text-neutral-900 dark:text-neutral-200">
+            {formatTimeDisplay(currentTime, true)}
+          </span>
+          <span>/</span>
+          <span>{formatTimeDisplay(duration, false)}</span>
         </div>
-        <span className="font-mono text-[10px] text-neutral-400">
-          Duración total: {formatTimeDisplay(duration, false)}
-        </span>
       </div>
     </div>
   );
