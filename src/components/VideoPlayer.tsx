@@ -323,59 +323,65 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   };
 
+  // Merge global style with per-cue styleOverride (used for batch-edited cue styles)
+  const activeCueStyle = useMemo<SubtitleStyle>(() => {
+    if (!activeCue?.styleOverride) return style;
+    return { ...style, ...activeCue.styleOverride };
+  }, [style, activeCue?.styleOverride]);
+
   // Build real-time CSS for subtitle overlay
   const overlayStyle = useMemo(() => {
     let textShadow = 'none';
-    if (style.hasShadow) {
-      textShadow = `${style.shadowOffsetX}px ${style.shadowOffsetY}px ${style.shadowBlur}px ${style.shadowColor}`;
+    if (activeCueStyle.hasShadow) {
+      textShadow = `${activeCueStyle.shadowOffsetX}px ${activeCueStyle.shadowOffsetY}px ${activeCueStyle.shadowBlur}px ${activeCueStyle.shadowColor}`;
     }
 
     let webkitTextStroke = 'none';
-    if (style.hasStroke && style.strokeWidth > 0) {
-      webkitTextStroke = `${style.strokeWidth}px ${style.strokeColor}`;
+    if (activeCueStyle.hasStroke && activeCueStyle.strokeWidth > 0) {
+      webkitTextStroke = `${activeCueStyle.strokeWidth}px ${activeCueStyle.strokeColor}`;
     }
 
     let backgroundColor = 'transparent';
-    if (style.hasBackground && style.backgroundOpacity > 0) {
-      const hex = style.backgroundColor.replace('#', '');
+    if (activeCueStyle.hasBackground && activeCueStyle.backgroundOpacity > 0) {
+      const hex = activeCueStyle.backgroundColor.replace('#', '');
       const r = parseInt(hex.substring(0, 2), 16) || 0;
       const g = parseInt(hex.substring(2, 4), 16) || 0;
       const b = parseInt(hex.substring(4, 6), 16) || 0;
-      backgroundColor = `rgba(${r}, ${g}, ${b}, ${style.backgroundOpacity})`;
+      backgroundColor = `rgba(${r}, ${g}, ${b}, ${activeCueStyle.backgroundOpacity})`;
     }
 
-    const minSize = Math.max(14, Math.round(style.fontSize * 0.45));
-    const cqwVal = (style.fontSize / 5.5).toFixed(2);
-    const maxSize = Math.round(style.fontSize * 3.8);
+    const minSize = Math.max(14, Math.round(activeCueStyle.fontSize * 0.45));
+    const cqwVal = (activeCueStyle.fontSize / 5.5).toFixed(2);
+    const maxSize = Math.round(activeCueStyle.fontSize * 3.8);
 
-    const calculatedFontSize = style.fullScreenSubtitle
-      ? `clamp(24px, ${(style.fontSize / 4.0).toFixed(2)}cqw, ${style.fontSize * 4.5}px)`
+    const calculatedFontSize = activeCueStyle.fullScreenSubtitle
+      ? `clamp(24px, ${(activeCueStyle.fontSize / 4.0).toFixed(2)}cqw, ${activeCueStyle.fontSize * 4.5}px)`
       : `clamp(${minSize}px, ${cqwVal}cqw, ${maxSize}px)`;
 
     return {
-      fontFamily: `"${style.fontFamily}", sans-serif`,
+      fontFamily: `"${activeCueStyle.fontFamily}", sans-serif`,
       fontSize: calculatedFontSize,
-      fontWeight: style.fontWeight,
-      color: style.textColor,
-      textTransform: style.textTransform,
-      letterSpacing: `${style.letterSpacing}px`,
+      fontWeight: activeCueStyle.fontWeight,
+      color: activeCueStyle.textColor,
+      textTransform: activeCueStyle.textTransform,
+      letterSpacing: `${activeCueStyle.letterSpacing}px`,
       lineHeight: 1.25,
       WebkitTextStroke: webkitTextStroke,
       paintOrder: 'stroke fill',
       textShadow,
       backgroundColor,
-      padding: style.hasBackground
-        ? `${style.backgroundPadding}px ${style.backgroundPadding * 1.6}px`
+      padding: activeCueStyle.hasBackground
+        ? `${activeCueStyle.backgroundPadding}px ${activeCueStyle.backgroundPadding * 1.6}px`
         : '2px 8px',
-      borderRadius: `${style.backgroundRounded}px`,
-      textAlign: style.textAlign,
+      borderRadius: `${activeCueStyle.backgroundRounded}px`,
+      textAlign: activeCueStyle.textAlign,
       boxSizing: 'border-box' as const,
       display: 'inline-flex',
       flexDirection: 'column' as const,
       alignItems:
-        style.textAlign === 'left'
+        activeCueStyle.textAlign === 'left'
           ? 'flex-start'
-          : style.textAlign === 'right'
+          : activeCueStyle.textAlign === 'right'
           ? 'flex-end'
           : 'center',
       justifyContent: 'center',
@@ -384,25 +390,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       wordBreak: 'break-word' as const,
       whiteSpace: 'pre-wrap' as const,
     };
-  }, [style]);
+  }, [activeCueStyle]);
 
   const positionClass = useMemo(() => {
     let vertical = 'bottom-8 inset-x-0 items-end';
-    if (style.position === 'top') {
+    if (activeCueStyle.position === 'top') {
       vertical = 'top-6 inset-x-0 items-start';
-    } else if (style.position === 'middle' || style.fullScreenSubtitle) {
+    } else if (activeCueStyle.position === 'middle' || activeCueStyle.fullScreenSubtitle) {
       vertical = 'inset-0 items-center';
     }
 
     let horizontal = 'justify-center text-center px-6';
-    if (style.textAlign === 'left') {
+    if (activeCueStyle.textAlign === 'left') {
       horizontal = 'justify-start text-left pl-8 pr-4';
-    } else if (style.textAlign === 'right') {
+    } else if (activeCueStyle.textAlign === 'right') {
       horizontal = 'justify-end text-right pr-8 pl-4';
     }
 
     return `${vertical} ${horizontal}`;
-  }, [style.position, style.textAlign, style.fullScreenSubtitle]);
+  }, [activeCueStyle.position, activeCueStyle.textAlign, activeCueStyle.fullScreenSubtitle]);
 
   // Exact mathematical fit inside the stage container using size container units
   const frameStyle = useMemo<React.CSSProperties>(() => {
@@ -587,10 +593,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   className={`absolute pointer-events-auto flex justify-center px-6 z-20 transition-all duration-75 ${positionClass}`}
                   style={{
                     transform:
-                      style.position === 'bottom'
-                        ? `translateY(-${style.verticalOffset * 1.8}px)`
-                        : style.position === 'top'
-                        ? `translateY(${style.verticalOffset * 1.8}px)`
+                      activeCueStyle.position === 'bottom'
+                        ? `translateY(-${activeCueStyle.verticalOffset * 1.8}px)`
+                        : activeCueStyle.position === 'top'
+                        ? `translateY(${activeCueStyle.verticalOffset * 1.8}px)`
                         : 'none',
                   }}
                 >

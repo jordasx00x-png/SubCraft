@@ -73,21 +73,25 @@ export function drawSubtitleOnCanvas(
 ) {
   if (!cue || !cue.text.trim()) return;
 
+  const effectiveStyle: SubtitleStyle = cue.styleOverride
+    ? { ...style, ...cue.styleOverride }
+    : style;
+
   // Scale font size proportionally to match editor preview ratio (editor preview height ~400px)
   const scale = canvasHeight / 400;
-  const scaledFontSize = Math.max(16, Math.round(style.fontSize * scale));
+  const scaledFontSize = Math.max(16, Math.round(effectiveStyle.fontSize * scale));
   const lineHeight = scaledFontSize * 1.25;
 
   let formattedText = cue.text.trim();
-  if (style.textTransform === 'uppercase') {
+  if (effectiveStyle.textTransform === 'uppercase') {
     formattedText = formattedText.toUpperCase();
-  } else if (style.textTransform === 'capitalize') {
+  } else if (effectiveStyle.textTransform === 'capitalize') {
     formattedText = formattedText.replace(/\b\w/g, (c) => c.toUpperCase());
   }
 
   ctx.save();
-  ctx.font = `${style.fontWeight} ${scaledFontSize}px "${style.fontFamily}", sans-serif`;
-  ctx.textAlign = style.textAlign;
+  ctx.font = `${effectiveStyle.fontWeight} ${scaledFontSize}px "${effectiveStyle.fontFamily}", sans-serif`;
+  ctx.textAlign = effectiveStyle.textAlign;
   ctx.textBaseline = 'middle';
 
   const maxLineWidth = canvasWidth * 0.88;
@@ -96,11 +100,11 @@ export function drawSubtitleOnCanvas(
 
   // Compute vertical position
   let centerY: number;
-  const offsetPx = (style.verticalOffset / 100) * canvasHeight;
+  const offsetPx = (effectiveStyle.verticalOffset / 100) * canvasHeight;
 
-  if (style.position === 'top') {
+  if (effectiveStyle.position === 'top') {
     centerY = offsetPx + totalTextHeight / 2;
-  } else if (style.position === 'middle') {
+  } else if (effectiveStyle.position === 'middle') {
     centerY = canvasHeight / 2;
   } else {
     // bottom
@@ -108,9 +112,9 @@ export function drawSubtitleOnCanvas(
   }
 
   // Draw background box if enabled
-  if (style.hasBackground && style.backgroundOpacity > 0) {
-    const padding = style.backgroundPadding * scale;
-    const radius = style.backgroundRounded * scale;
+  if (effectiveStyle.hasBackground && effectiveStyle.backgroundOpacity > 0) {
+    const padding = effectiveStyle.backgroundPadding * scale;
+    const radius = effectiveStyle.backgroundRounded * scale;
 
     let maxBoxWidth = 0;
     for (const line of lines) {
@@ -122,18 +126,17 @@ export function drawSubtitleOnCanvas(
     const boxHeight = totalTextHeight + padding * 2;
     
     let boxX = (canvasWidth - boxWidth) / 2;
-    if (style.textAlign === 'left') {
+    if (effectiveStyle.textAlign === 'left') {
       boxX = canvasWidth * 0.08 - padding * 1.5;
-    } else if (style.textAlign === 'right') {
+    } else if (effectiveStyle.textAlign === 'right') {
       boxX = canvasWidth * 0.92 - boxWidth + padding * 1.5;
     }
 
     const boxY = centerY - totalTextHeight / 2 - padding;
 
     ctx.save();
-    // Parse hex or rgb to rgba
-    ctx.fillStyle = style.backgroundColor;
-    ctx.globalAlpha = style.backgroundOpacity;
+    ctx.fillStyle = effectiveStyle.backgroundColor;
+    ctx.globalAlpha = effectiveStyle.backgroundOpacity;
     roundRect(ctx, boxX, boxY, boxWidth, boxHeight, radius);
     ctx.fill();
     ctx.restore();
@@ -141,9 +144,9 @@ export function drawSubtitleOnCanvas(
 
   // Horizontal X coordinate
   let textX = canvasWidth / 2;
-  if (style.textAlign === 'left') {
+  if (effectiveStyle.textAlign === 'left') {
     textX = canvasWidth * 0.08;
-  } else if (style.textAlign === 'right') {
+  } else if (effectiveStyle.textAlign === 'right') {
     textX = canvasWidth * 0.92;
   }
 
@@ -153,10 +156,10 @@ export function drawSubtitleOnCanvas(
     const lineY = startY + index * lineHeight;
 
     // Stroke / Outline
-    if (style.hasStroke && style.strokeWidth > 0) {
+    if (effectiveStyle.hasStroke && effectiveStyle.strokeWidth > 0) {
       ctx.save();
-      ctx.strokeStyle = style.strokeColor;
-      ctx.lineWidth = style.strokeWidth * scale;
+      ctx.strokeStyle = effectiveStyle.strokeColor;
+      ctx.lineWidth = effectiveStyle.strokeWidth * scale;
       ctx.lineJoin = 'round';
       ctx.miterLimit = 2;
       ctx.strokeText(line, textX, lineY);
@@ -164,18 +167,18 @@ export function drawSubtitleOnCanvas(
     }
 
     // Shadow
-    if (style.hasShadow) {
+    if (effectiveStyle.hasShadow) {
       ctx.save();
-      ctx.shadowColor = style.shadowColor;
-      ctx.shadowBlur = style.shadowBlur * scale;
-      ctx.shadowOffsetX = style.shadowOffsetX * scale;
-      ctx.shadowOffsetY = style.shadowOffsetY * scale;
-      ctx.fillStyle = style.textColor;
+      ctx.shadowColor = effectiveStyle.shadowColor;
+      ctx.shadowBlur = effectiveStyle.shadowBlur * scale;
+      ctx.shadowOffsetX = effectiveStyle.shadowOffsetX * scale;
+      ctx.shadowOffsetY = effectiveStyle.shadowOffsetY * scale;
+      ctx.fillStyle = effectiveStyle.textColor;
       ctx.fillText(line, textX, lineY);
       ctx.restore();
     } else {
       ctx.save();
-      ctx.fillStyle = style.textColor;
+      ctx.fillStyle = effectiveStyle.textColor;
       ctx.fillText(line, textX, lineY);
       ctx.restore();
     }

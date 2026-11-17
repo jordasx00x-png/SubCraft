@@ -4,6 +4,7 @@ export interface SubtitleCue {
   end: number;   // in seconds, e.g. 4.50
   text: string;
   speaker?: string;
+  styleOverride?: Partial<SubtitleStyle>;
 }
 
 export type SubtitlePreset =

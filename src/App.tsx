@@ -60,7 +60,10 @@ interface HistorySnapshot {
 const MAX_HISTORY_STEPS = 60;
 
 const cloneSnapshot = (snap: HistorySnapshot): HistorySnapshot => ({
-  subtitles: snap.subtitles.map((cue) => ({ ...cue })),
+  subtitles: snap.subtitles.map((cue) => ({
+    ...cue,
+    styleOverride: cue.styleOverride ? { ...cue.styleOverride } : undefined,
+  })),
   style: { ...snap.style },
   projectTitle: snap.projectTitle,
   selectedCueId: snap.selectedCueId,
@@ -113,6 +116,7 @@ export default function App() {
   const [targetLanguage, setTargetLanguage] = useState<string>('es');
   const [subtitles, setSubtitles] = useState<SubtitleCue[]>(() => ensureUniqueCueIds(INITIAL_SAMPLE_SUBTITLES));
   const [selectedCueId, setSelectedCueId] = useState<string | number | null>(null);
+  const [selectedCueIds, setSelectedCueIds] = useState<Array<string | number>>([]);
   const [style, setStyle] = useState<SubtitleStyle>(DEFAULT_STYLE);
 
   // Video playback
@@ -507,17 +511,52 @@ export default function App() {
     showHistoryFeedback('Cambio rehecho (Ctrl+Y)', 'redo');
   }, [applyRestoredSnapshot, showHistoryFeedback, syncHistoryFlags]);
 
-  // Unified synchronization handlers for playhead & cue selection
+  // Unified synchronization handlers for playhead & cue selection (supports Shift/Ctrl multi-select)
   const handleSelectCue = useCallback(
-    (id: string | number) => {
+    (
+      id: string | number,
+      modifiers?: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }
+    ) => {
+      const strId = String(id);
+
+      if (modifiers?.shiftKey && selectedCueId !== null && selectedCueId !== undefined) {
+        const anchorIdx = subtitles.findIndex((c) => String(c.id) === String(selectedCueId));
+        const targetIdx = subtitles.findIndex((c) => String(c.id) === strId);
+        if (anchorIdx !== -1 && targetIdx !== -1) {
+          const from = Math.min(anchorIdx, targetIdx);
+          const to = Math.max(anchorIdx, targetIdx);
+          setSelectedCueIds(subtitles.slice(from, to + 1).map((c) => c.id));
+          return;
+        }
+      }
+
+      if (modifiers?.ctrlKey || modifiers?.metaKey) {
+        setSelectedCueIds((prev) => {
+          const base =
+            prev.length > 0
+              ? prev
+              : selectedCueId !== null && selectedCueId !== undefined
+              ? [selectedCueId]
+              : [];
+          const exists = base.some((x) => String(x) === strId);
+          if (exists) {
+            return base.filter((x) => String(x) !== strId);
+          }
+          return [...base, id];
+        });
+        setSelectedCueId(id);
+        return;
+      }
+
       setSelectedCueId(id);
-      const cue = subtitles.find((c) => String(c.id) === String(id));
+      setSelectedCueIds([id]);
+      const cue = subtitles.find((c) => String(c.id) === strId);
       if (cue) {
         setCurrentTime(cue.start + 0.01);
         setIsPlaying(false);
       }
     },
-    [subtitles]
+    [subtitles, selectedCueId]
   );
 
   const handleSeek = useCallback(
@@ -549,6 +588,7 @@ export default function App() {
       const idx = subtitles.findIndex((cue) => String(cue.id) === String(id));
       const next = subtitles.filter((cue) => String(cue.id) !== String(id));
       setSubtitles(next);
+      setSelectedCueIds((prev) => prev.filter((x) => String(x) !== String(id)));
 
       if (String(selectedCueId) === String(id)) {
         if (next.length > 0) {
@@ -557,6 +597,29 @@ export default function App() {
         } else {
           setSelectedCueId(null);
         }
+      }
+    },
+    [subtitles, selectedCueId]
+  );
+
+  const handleBatchUpdateCues = useCallback(
+    (targetIds: Array<string | number>, updater: (cue: SubtitleCue) => SubtitleCue) => {
+      const targetSet = new Set(targetIds.map((id) => String(id)));
+      setSubtitles((prev) =>
+        prev.map((cue) => (targetSet.has(String(cue.id)) ? updater(cue) : cue))
+      );
+    },
+    []
+  );
+
+  const handleBatchDeleteCues = useCallback(
+    (targetIds: Array<string | number>) => {
+      const targetSet = new Set(targetIds.map((id) => String(id)));
+      const next = subtitles.filter((cue) => !targetSet.has(String(cue.id)));
+      setSubtitles(next);
+      setSelectedCueIds([]);
+      if (selectedCueId !== null && selectedCueId !== undefined && targetSet.has(String(selectedCueId))) {
+        setSelectedCueId(next.length > 0 ? next[0].id : null);
       }
     },
     [subtitles, selectedCueId]
@@ -626,11 +689,14 @@ export default function App() {
         currentView === 'studio' &&
         !hasOpenModal &&
         (e.key === 'Delete' || e.key === 'Backspace') &&
-        selectedCueId !== null &&
-        selectedCueId !== undefined
+        (selectedCueIds.length > 0 || (selectedCueId !== null && selectedCueId !== undefined))
       ) {
         e.preventDefault();
-        handleDeleteCue(selectedCueId);
+        if (selectedCueIds.length > 1) {
+          handleBatchDeleteCues(selectedCueIds);
+        } else if (selectedCueId !== null && selectedCueId !== undefined) {
+          handleDeleteCue(selectedCueId);
+        }
       }
     };
 
@@ -640,10 +706,12 @@ export default function App() {
     currentView,
     currentTime,
     selectedCueId,
+    selectedCueIds,
     handleSeek,
     handleUndo,
     handleRedo,
     handleDeleteCue,
+    handleBatchDeleteCues,
     showCreateProjectModal,
     showGenerateModal,
     showExportModal,
@@ -896,6 +964,7 @@ export default function App() {
       setVideoFile(restoredFile);
       setVideoUrl(restoredUrl);
       setSelectedCueId(loadedSelectedId);
+      setSelectedCueIds(loadedSelectedId !== null ? [loadedSelectedId] : []);
       setCurrentTime(0);
 
       resetHistory({
@@ -969,6 +1038,7 @@ export default function App() {
     setCurrentTime(0);
     setIsPlaying(false);
     setSelectedCueId(initialSelectedId);
+    setSelectedCueIds(initialSelectedId !== null ? [initialSelectedId] : []);
 
     resetHistory({
       subtitles: initialCues,
@@ -1128,6 +1198,7 @@ export default function App() {
           <TranscriptPanel
             subtitles={subtitles}
             selectedCueId={selectedCueId}
+            selectedCueIds={selectedCueIds}
             currentTime={currentTime}
             onSelectCue={handleSelectCue}
             onAddCueAtTime={(time) => {
@@ -1139,6 +1210,7 @@ export default function App() {
                 text: 'Nuevo subtítulo...',
               });
               setSelectedCueId(newId);
+              setSelectedCueIds([newId]);
               setCurrentTime(Math.round(time * 100) / 100 + 0.01);
               setIsPlaying(false);
             }}
@@ -1176,13 +1248,17 @@ export default function App() {
             onChangeTab={setActiveStudioTab}
             subtitles={subtitles}
             selectedCueId={selectedCueId}
+            selectedCueIds={selectedCueIds}
             onSelectCue={handleSelectCue}
+            onSetSelectedCueIds={setSelectedCueIds}
             currentTime={currentTime}
             duration={duration}
             style={style}
             onChangeStyle={setStyle}
             onUpdateCue={handleUpdateCue}
+            onBatchUpdateCues={handleBatchUpdateCues}
             onDeleteCue={handleDeleteCue}
+            onBatchDeleteCues={handleBatchDeleteCues}
             onAddCue={handleAddCue}
             onMergeWithNext={handleMergeWithNext}
             onSplitCue={handleSplitCue}
@@ -1206,6 +1282,7 @@ export default function App() {
             duration={duration}
             currentTime={currentTime}
             selectedCueId={selectedCueId}
+            selectedCueIds={selectedCueIds}
             onSeek={handleSeek}
             onPause={() => setIsPlaying(false)}
             onUpdateCue={handleUpdateCue}

@@ -36,6 +36,8 @@ import {
   AudioLines,
   Loader2,
   Undo2,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 import {
   SubtitleCue,
@@ -54,13 +56,23 @@ interface StudioInspectorProps {
   onChangeTab: (tab: StudioTab) => void;
   subtitles: SubtitleCue[];
   selectedCueId?: string | number | null;
-  onSelectCue?: (id: string | number) => void;
+  selectedCueIds?: Array<string | number>;
+  onSelectCue?: (
+    id: string | number,
+    modifiers?: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }
+  ) => void;
+  onSetSelectedCueIds?: (ids: Array<string | number>) => void;
   currentTime: number;
   duration: number;
   style: SubtitleStyle;
   onChangeStyle: (newStyle: SubtitleStyle) => void;
   onUpdateCue: (updatedCue: SubtitleCue) => void;
+  onBatchUpdateCues?: (
+    targetIds: Array<string | number>,
+    updater: (cue: SubtitleCue) => SubtitleCue
+  ) => void;
   onDeleteCue: (id: string | number) => void;
+  onBatchDeleteCues?: (targetIds: Array<string | number>) => void;
   onAddCue: (cue: SubtitleCue, index?: number) => void;
   onMergeWithNext: (index: number) => void;
   onSplitCue: (index: number) => void;
@@ -146,13 +158,17 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
   onChangeTab,
   subtitles,
   selectedCueId,
+  selectedCueIds = [],
   onSelectCue,
+  onSetSelectedCueIds,
   currentTime,
   duration,
   style,
   onChangeStyle,
   onUpdateCue,
+  onBatchUpdateCues,
   onDeleteCue,
+  onBatchDeleteCues,
   onAddCue,
   onMergeWithNext,
   onSplitCue,
@@ -174,6 +190,23 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
   const [timeShiftOffset, setTimeShiftOffset] = useState<number>(0.5);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [groqKey, setGroqKey] = useState<string>(() => localStorage.getItem('subcraft_groq_api_key') || '');
+
+  // Batch Edit mode & controls state
+  const [inspectorSubMode, setInspectorSubMode] = useState<'single' | 'batch'>('single');
+  const [batchTimingTarget, setBatchTimingTarget] = useState<'both' | 'start' | 'end' | 'duration'>('both');
+  const [batchOffsetInput, setBatchOffsetInput] = useState<string>('0.5');
+  const [batchFixedDuration, setBatchFixedDuration] = useState<string>('2.5');
+  const [batchRangeStart, setBatchRangeStart] = useState<string>('1');
+  const [batchRangeEnd, setBatchRangeEnd] = useState<string>('5');
+  const [batchSpeakerInput, setBatchSpeakerInput] = useState<string>('');
+  const prevBatchCountRef = React.useRef<number>(selectedCueIds.length);
+
+  React.useEffect(() => {
+    if (selectedCueIds.length >= 2 && prevBatchCountRef.current < 2) {
+      setInspectorSubMode('batch');
+    }
+    prevBatchCountRef.current = selectedCueIds.length;
+  }, [selectedCueIds.length]);
 
   // Auto-Align Subtitles state
   const [isAligning, setIsAligning] = useState(false);
@@ -321,6 +354,160 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
     setTimeout(() => setSuccessMsg(null), 3000);
   };
 
+  // Effective batch selection: uses explicit selectedCueIds, or falls back to current selectedCue
+  const effectiveBatchIds = useMemo(() => {
+    if (selectedCueIds.length > 0) return selectedCueIds;
+    if (selectedCue) return [selectedCue.id];
+    return [];
+  }, [selectedCueIds, selectedCue]);
+
+  const effectiveBatchIdSet = useMemo(
+    () => new Set(effectiveBatchIds.map((id) => String(id))),
+    [effectiveBatchIds]
+  );
+
+  const batchSelectedCues = useMemo(
+    () => subtitles.filter((cue) => effectiveBatchIdSet.has(String(cue.id))),
+    [subtitles, effectiveBatchIdSet]
+  );
+
+  // Representative merged style for the first selected cue in the batch
+  const batchSampleStyle = useMemo<SubtitleStyle>(() => {
+    const first = batchSelectedCues[0];
+    if (!first?.styleOverride) return style;
+    return { ...style, ...first.styleOverride };
+  }, [batchSelectedCues, style]);
+
+  const showBatchToast = (msg: string) => {
+    setSuccessMsg(msg);
+    setTimeout(() => setSuccessMsg(null), 3000);
+  };
+
+  const toggleBatchCueId = (id: string | number) => {
+    if (!onSetSelectedCueIds) return;
+    const strId = String(id);
+    const exists = effectiveBatchIds.some((x) => String(x) === strId);
+    if (exists) {
+      const next = effectiveBatchIds.filter((x) => String(x) !== strId);
+      onSetSelectedCueIds(next);
+    } else {
+      onSetSelectedCueIds([...effectiveBatchIds, id]);
+    }
+  };
+
+  const handleApplyBatchRange = () => {
+    if (!onSetSelectedCueIds || subtitles.length === 0) return;
+    const from = Math.max(1, Math.min(subtitles.length, parseInt(batchRangeStart, 10) || 1));
+    const to = Math.max(from, Math.min(subtitles.length, parseInt(batchRangeEnd, 10) || subtitles.length));
+    const rangeIds = subtitles.slice(from - 1, to).map((c) => c.id);
+    onSetSelectedCueIds(rangeIds);
+  };
+
+  const handleBatchTimingOffset = (deltaSeconds: number) => {
+    if (!onBatchUpdateCues || effectiveBatchIds.length === 0 || Number.isNaN(deltaSeconds)) return;
+
+    onBatchUpdateCues(effectiveBatchIds, (cue) => {
+      if (batchTimingTarget === 'start') {
+        const nextStart = Math.max(0, Math.round((cue.start + deltaSeconds) * 100) / 100);
+        const safeStart = Math.min(nextStart, Math.round((cue.end - 0.1) * 100) / 100);
+        return { ...cue, start: Math.max(0, safeStart) };
+      }
+      if (batchTimingTarget === 'end') {
+        const nextEnd = Math.max(cue.start + 0.1, Math.round((cue.end + deltaSeconds) * 100) / 100);
+        return { ...cue, end: nextEnd };
+      }
+      // both
+      const dur = Math.max(0.1, cue.end - cue.start);
+      const nextStart = Math.max(0, Math.round((cue.start + deltaSeconds) * 100) / 100);
+      const nextEnd = Math.round((nextStart + dur) * 100) / 100;
+      return { ...cue, start: nextStart, end: nextEnd };
+    });
+
+    showBatchToast(
+      `${effectiveBatchIds.length} bloques ajustados (${deltaSeconds >= 0 ? '+' : ''}${deltaSeconds}s)`
+    );
+  };
+
+  const handleBatchFixedDuration = () => {
+    const dur = parseFloat(batchFixedDuration);
+    if (!onBatchUpdateCues || effectiveBatchIds.length === 0 || Number.isNaN(dur) || dur < 0.2) return;
+    const clampedDur = Math.round(dur * 100) / 100;
+    onBatchUpdateCues(effectiveBatchIds, (cue) => ({
+      ...cue,
+      end: Math.round((cue.start + clampedDur) * 100) / 100,
+    }));
+    showBatchToast(`Duración fijada a ${clampedDur}s en ${effectiveBatchIds.length} bloques`);
+  };
+
+  const handleBatchStylePatch = (patch: Partial<SubtitleStyle>, label?: string) => {
+    if (!onBatchUpdateCues || effectiveBatchIds.length === 0) return;
+    onBatchUpdateCues(effectiveBatchIds, (cue) => ({
+      ...cue,
+      styleOverride: {
+        ...(cue.styleOverride || {}),
+        ...patch,
+      },
+    }));
+    if (label) {
+      showBatchToast(`${label} aplicado a ${effectiveBatchIds.length} bloques`);
+    }
+  };
+
+  const handleBatchApplyPreset = (presetKey: SubtitlePreset) => {
+    const preset = STYLE_PRESETS[presetKey];
+    if (!preset) return;
+    handleBatchStylePatch(
+      {
+        fontFamily: preset.fontFamily,
+        fontSize: preset.fontSize,
+        fontWeight: preset.fontWeight,
+        textColor: preset.textColor,
+        textTransform: preset.textTransform,
+        letterSpacing: preset.letterSpacing,
+        hasStroke: preset.hasStroke,
+        strokeColor: preset.strokeColor,
+        strokeWidth: preset.strokeWidth,
+        hasBackground: preset.hasBackground,
+        backgroundColor: preset.backgroundColor,
+        backgroundOpacity: preset.backgroundOpacity,
+        backgroundPadding: preset.backgroundPadding,
+        backgroundRounded: preset.backgroundRounded,
+        hasShadow: preset.hasShadow,
+        shadowColor: preset.shadowColor,
+        shadowBlur: preset.shadowBlur,
+        shadowOffsetX: preset.shadowOffsetX,
+        shadowOffsetY: preset.shadowOffsetY,
+        position: preset.position,
+        verticalOffset: preset.verticalOffset,
+        textAlign: preset.textAlign,
+      },
+      `Preset "${presetKey}"`
+    );
+  };
+
+  const handleBatchResetStyle = () => {
+    if (!onBatchUpdateCues || effectiveBatchIds.length === 0) return;
+    onBatchUpdateCues(effectiveBatchIds, (cue) => {
+      const { styleOverride: _removed, ...rest } = cue;
+      return rest;
+    });
+    showBatchToast(`Estilo global restaurado en ${effectiveBatchIds.length} bloques`);
+  };
+
+  const handleBatchSpeakerApply = () => {
+    if (!onBatchUpdateCues || effectiveBatchIds.length === 0) return;
+    const trimmed = batchSpeakerInput.trim();
+    onBatchUpdateCues(effectiveBatchIds, (cue) => ({
+      ...cue,
+      speaker: trimmed,
+    }));
+    showBatchToast(
+      trimmed
+        ? `Locutor "${trimmed}" aplicado a ${effectiveBatchIds.length} bloques`
+        : `Locutor limpiado en ${effectiveBatchIds.length} bloques`
+    );
+  };
+
   return (
     <div className="bg-white dark:bg-[#0e1017] flex flex-col h-full min-h-0 overflow-hidden select-none">
       {/* Docked 40px Tab Ribbon (Aligned horizontally with Script & Monitor Headers) */}
@@ -388,9 +575,40 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
         </div>
       )}
 
-      {/* TAB 1: SINGLE SELECTED SUBTITLE CUE INSPECTOR */}
+      {/* TAB 1: SINGLE OR BATCH SUBTITLE CUE INSPECTOR */}
       {activeTab === 'subtitles' && (
         <div className="flex-1 flex flex-col min-h-0 p-3.5 overflow-y-auto space-y-3">
+          {subtitles.length > 0 && (
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-neutral-100 dark:bg-[#0b0c10] border border-neutral-200 dark:border-neutral-800 shrink-0">
+              <button
+                type="button"
+                onClick={() => setInspectorSubMode('single')}
+                className={`flex-1 py-1.5 px-2.5 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                  inspectorSubMode === 'single'
+                    ? 'bg-white dark:bg-[#151823] text-neutral-950 dark:text-white shadow-xs font-semibold border border-neutral-200/80 dark:border-neutral-800'
+                    : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
+                }`}
+              >
+                Bloque individual
+              </button>
+              <button
+                type="button"
+                onClick={() => setInspectorSubMode('batch')}
+                className={`flex-1 py-1.5 px-2.5 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap flex items-center justify-center gap-1.5 ${
+                  inspectorSubMode === 'batch'
+                    ? 'bg-indigo-600 text-white shadow-xs font-semibold'
+                    : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5 shrink-0" />
+                <span>Edición por lote</span>
+                <span className="font-mono tabular-nums text-[11px] opacity-85">
+                  ({effectiveBatchIds.length})
+                </span>
+              </button>
+            </div>
+          )}
+
           {subtitles.length === 0 ? (
             <div className="py-16 text-center text-neutral-400 text-xs">
               <Subtitles className="w-12 h-12 mx-auto text-indigo-500 mb-3 opacity-80" />
@@ -406,6 +624,452 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
               >
                 Ejecutar Generador Algorítmico
               </button>
+            </div>
+          ) : inspectorSubMode === 'batch' ? (
+            /* BATCH EDITING WORKSPACE */
+            <div className="space-y-3">
+              {/* 1. Multi-Cue Selection Panel */}
+              <div className="p-3 rounded-xl bg-white dark:bg-[#141620] border border-neutral-200/80 dark:border-neutral-800 space-y-2.5">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+                    Selección múltiple
+                  </span>
+                  <span className="font-mono tabular-nums text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold">
+                    {effectiveBatchIds.length} de {subtitles.length}
+                  </span>
+                </div>
+
+                {/* Quick Selection Actions */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onSetSelectedCueIds?.(subtitles.map((c) => c.id))}
+                    className="px-2 py-1 text-[11px] font-medium rounded-md bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 cursor-pointer transition-colors whitespace-nowrap"
+                  >
+                    Todos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const startIdx = Math.max(0, selectedIndex);
+                      onSetSelectedCueIds?.(subtitles.slice(startIdx).map((c) => c.id));
+                    }}
+                    className="px-2 py-1 text-[11px] font-medium rounded-md bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 cursor-pointer transition-colors whitespace-nowrap"
+                  >
+                    Desde #{Math.max(1, selectedIndex + 1)} al fin
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSetSelectedCueIds?.(selectedCue ? [selectedCue.id] : [])}
+                    className="px-2 py-1 text-[11px] font-medium rounded-md bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 cursor-pointer transition-colors whitespace-nowrap"
+                  >
+                    Solo actual
+                  </button>
+                </div>
+
+                {/* Range Selector */}
+                <div className="flex items-center gap-1.5 text-[11px]">
+                  <span className="text-neutral-500 shrink-0">Rango #</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={subtitles.length}
+                    value={batchRangeStart}
+                    onChange={(e) => setBatchRangeStart(e.target.value)}
+                    className="w-12 px-1.5 py-1 rounded bg-neutral-50 dark:bg-[#0c0d12] border border-neutral-200 dark:border-neutral-800 font-mono tabular-nums text-center text-xs outline-none focus:border-indigo-500"
+                  />
+                  <span className="text-neutral-500">a</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={subtitles.length}
+                    value={batchRangeEnd}
+                    onChange={(e) => setBatchRangeEnd(e.target.value)}
+                    className="w-12 px-1.5 py-1 rounded bg-neutral-50 dark:bg-[#0c0d12] border border-neutral-200 dark:border-neutral-800 font-mono tabular-nums text-center text-xs outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleApplyBatchRange}
+                    className="px-2.5 py-1 rounded bg-indigo-600/15 hover:bg-indigo-600 text-indigo-600 dark:text-indigo-400 hover:text-white font-semibold transition-colors cursor-pointer whitespace-nowrap ml-auto"
+                  >
+                    Seleccionar rango
+                  </button>
+                </div>
+
+                {/* Scrollable Multi-Select Cue Checklist */}
+                <div className="max-h-32 overflow-y-auto divide-y divide-neutral-100 dark:divide-neutral-800/70 rounded-lg border border-neutral-200/80 dark:border-neutral-800 bg-neutral-50/70 dark:bg-[#0b0c10]">
+                  {subtitles.map((cue, idx) => {
+                    const checked = effectiveBatchIdSet.has(String(cue.id));
+                    return (
+                      <button
+                        key={cue.id}
+                        type="button"
+                        onClick={() => toggleBatchCueId(cue.id)}
+                        className={`w-full px-2.5 py-1.5 text-left flex items-center gap-2 text-[11px] transition-colors cursor-pointer ${
+                          checked
+                            ? 'bg-indigo-500/10 text-neutral-900 dark:text-white'
+                            : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800/50'
+                        }`}
+                      >
+                        {checked ? (
+                          <CheckSquare className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                        ) : (
+                          <Square className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
+                        )}
+                        <span className="font-mono tabular-nums font-bold shrink-0">#{idx + 1}</span>
+                        <span className="font-mono tabular-nums text-[10px] text-neutral-500 shrink-0">
+                          {formatTimeDisplay(cue.start, true)}
+                        </span>
+                        <span className="truncate flex-1">{cue.text || '(Vacío)'}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-neutral-500">
+                  Tip: también puedes usar <span className="font-semibold">Shift+Clic</span> o <span className="font-semibold">Ctrl+Clic</span> en el Guion o la Línea de Tiempo.
+                </p>
+              </div>
+
+              {/* 2. Batch Timing Offsets */}
+              <div className="p-3 rounded-xl bg-white dark:bg-[#141620] border border-neutral-200/80 dark:border-neutral-800 space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Desfase de tiempos</span>
+                  </span>
+                  {batchSelectedCues[0] && (
+                    <span className="text-[10px] font-mono tabular-nums text-neutral-500">
+                      #{subtitles.indexOf(batchSelectedCues[0]) + 1}: {formatTimeDisplay(batchSelectedCues[0].start, true)} – {formatTimeDisplay(batchSelectedCues[0].end, true)}
+                    </span>
+                  )}
+                </div>
+
+                {/* Timing Target Selector */}
+                <div className="grid grid-cols-4 gap-1 p-0.5 rounded-lg bg-neutral-100 dark:bg-[#0c0d12] border border-neutral-200 dark:border-neutral-800">
+                  {[
+                    { id: 'both', label: 'Ambos' },
+                    { id: 'start', label: 'Inicio' },
+                    { id: 'end', label: 'Fin' },
+                    { id: 'duration', label: 'Duración' },
+                  ].map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setBatchTimingTarget(item.id as 'both' | 'start' | 'end' | 'duration')}
+                      className={`py-1 px-1.5 rounded text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                        batchTimingTarget === item.id
+                          ? 'bg-white dark:bg-[#1a1e2b] text-neutral-950 dark:text-white font-semibold shadow-xs'
+                          : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+
+                {batchTimingTarget === 'duration' ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      step={0.1}
+                      min={0.2}
+                      value={batchFixedDuration}
+                      onChange={(e) => setBatchFixedDuration(e.target.value)}
+                      className="w-24 px-2.5 py-1.5 rounded-lg bg-neutral-50 dark:bg-[#0c0d12] border border-neutral-200 dark:border-neutral-800 text-xs font-mono tabular-nums outline-none focus:border-indigo-500"
+                    />
+                    <span className="text-xs text-neutral-500">seg</span>
+                    <button
+                      type="button"
+                      disabled={effectiveBatchIds.length === 0}
+                      onClick={handleBatchFixedDuration}
+                      className="ml-auto px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      Aplicar duración
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-6 gap-1">
+                      {[-1.0, -0.5, -0.1, 0.1, 0.5, 1.0].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          disabled={effectiveBatchIds.length === 0}
+                          onClick={() => handleBatchTimingOffset(val)}
+                          className="py-1.5 rounded-md bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 disabled:opacity-40 text-[11px] font-mono tabular-nums font-semibold text-neutral-800 dark:text-neutral-200 cursor-pointer transition-colors"
+                        >
+                          {val > 0 ? `+${val}` : val}s
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        step={0.05}
+                        value={batchOffsetInput}
+                        onChange={(e) => setBatchOffsetInput(e.target.value)}
+                        placeholder="0.50"
+                        className="w-24 px-2.5 py-1.5 rounded-lg bg-neutral-50 dark:bg-[#0c0d12] border border-neutral-200 dark:border-neutral-800 text-xs font-mono tabular-nums outline-none focus:border-indigo-500"
+                      />
+                      <span className="text-[11px] text-neutral-500">seg (±)</span>
+                      <button
+                        type="button"
+                        disabled={effectiveBatchIds.length === 0}
+                        onClick={() => handleBatchTimingOffset(parseFloat(batchOffsetInput) || 0)}
+                        className="ml-auto px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        Aplicar desfase
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* 3. Batch Text Style Overrides */}
+              <div className="p-3 rounded-xl bg-white dark:bg-[#141620] border border-neutral-200/80 dark:border-neutral-800 space-y-3">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
+                    <Palette className="w-3.5 h-3.5 text-violet-500" />
+                    <span>Estilo de texto por lote</span>
+                  </span>
+                  <button
+                    type="button"
+                    disabled={effectiveBatchIds.length === 0}
+                    onClick={handleBatchResetStyle}
+                    className="text-[11px] text-neutral-500 hover:text-indigo-500 disabled:opacity-40 flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap"
+                    title="Quitar estilos individuales y volver al estilo global del proyecto"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Restablecer global</span>
+                  </button>
+                </div>
+
+                {/* Preset Swatches */}
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(Object.keys(STYLE_PRESETS) as SubtitlePreset[]).map((presetKey) => {
+                    const p = STYLE_PRESETS[presetKey];
+                    return (
+                      <button
+                        key={presetKey}
+                        type="button"
+                        disabled={effectiveBatchIds.length === 0}
+                        onClick={() => handleBatchApplyPreset(presetKey)}
+                        className="px-2 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-[#0c0d12] hover:border-indigo-500 text-left transition-colors cursor-pointer disabled:opacity-40"
+                      >
+                        <span className="text-[10px] font-semibold block truncate capitalize text-neutral-700 dark:text-neutral-300">
+                          {presetKey.replace('-', ' ')}
+                        </span>
+                        <span
+                          style={{ color: p.textColor, fontFamily: p.fontFamily }}
+                          className="text-[11px] font-bold block truncate"
+                        >
+                          Muestra
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Font & Size */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-2">
+                    <label className="text-[10px] font-semibold text-neutral-500 block mb-1">Fuente</label>
+                    <select
+                      disabled={effectiveBatchIds.length === 0}
+                      value={batchSampleStyle.fontFamily}
+                      onChange={(e) => handleBatchStylePatch({ fontFamily: e.target.value }, 'Fuente')}
+                      className="w-full text-xs px-2 py-1.5 rounded-lg bg-neutral-50 dark:bg-[#0c0d12] border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 outline-none"
+                    >
+                      {FONT_OPTIONS.map((f) => (
+                        <option key={f.value} value={f.value}>
+                          {f.value}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-neutral-500 block mb-1">Tamaño</label>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={14}
+                        max={76}
+                        disabled={effectiveBatchIds.length === 0}
+                        value={batchSampleStyle.fontSize}
+                        onChange={(e) => {
+                          const v = Math.max(14, Math.min(76, parseInt(e.target.value, 10) || 24));
+                          handleBatchStylePatch({ fontSize: v });
+                        }}
+                        className="w-full text-xs font-mono tabular-nums px-2 py-1.5 rounded-lg bg-neutral-50 dark:bg-[#0c0d12] border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Text Color */}
+                <div>
+                  <label className="text-[10px] font-semibold text-neutral-500 block mb-1.5">Color de texto</label>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {COLOR_SWATCHES.map((hex) => (
+                      <button
+                        key={hex}
+                        type="button"
+                        disabled={effectiveBatchIds.length === 0}
+                        onClick={() => handleBatchStylePatch({ textColor: hex }, 'Color')}
+                        style={{ backgroundColor: hex }}
+                        className={`w-6 h-6 rounded-md border transition-transform cursor-pointer disabled:opacity-40 ${
+                          batchSampleStyle.textColor.toUpperCase() === hex.toUpperCase()
+                            ? 'ring-2 ring-indigo-500 scale-110 border-white'
+                            : 'border-neutral-300 dark:border-neutral-600 hover:scale-105'
+                        }`}
+                        title={hex}
+                      />
+                    ))}
+                    <input
+                      type="color"
+                      disabled={effectiveBatchIds.length === 0}
+                      value={batchSampleStyle.textColor}
+                      onChange={(e) => handleBatchStylePatch({ textColor: e.target.value })}
+                      className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent p-0"
+                      title="Color personalizado"
+                    />
+                  </div>
+                </div>
+
+                {/* Transform & Position */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-semibold text-neutral-500 block mb-1">Formato</label>
+                    <div className="grid grid-cols-3 gap-1">
+                      {[
+                        { id: 'none', label: 'Aa' },
+                        { id: 'uppercase', label: 'AA' },
+                        { id: 'capitalize', label: 'Ab' },
+                      ].map((tr) => (
+                        <button
+                          key={tr.id}
+                          type="button"
+                          disabled={effectiveBatchIds.length === 0}
+                          onClick={() =>
+                            handleBatchStylePatch(
+                              { textTransform: tr.id as 'none' | 'uppercase' | 'capitalize' },
+                              'Formato'
+                            )
+                          }
+                          className={`py-1 rounded text-[11px] font-semibold border cursor-pointer transition-colors ${
+                            batchSampleStyle.textTransform === tr.id
+                              ? 'border-indigo-500 bg-indigo-500/15 text-indigo-600 dark:text-indigo-300'
+                              : 'border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400'
+                          }`}
+                        >
+                          {tr.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-semibold text-neutral-500 block mb-1">Posición</label>
+                    <div className="grid grid-cols-3 gap-1">
+                      {[
+                        { id: 'top', label: 'Arriba' },
+                        { id: 'middle', label: 'Centro' },
+                        { id: 'bottom', label: 'Abajo' },
+                      ].map((pos) => (
+                        <button
+                          key={pos.id}
+                          type="button"
+                          disabled={effectiveBatchIds.length === 0}
+                          onClick={() =>
+                            handleBatchStylePatch(
+                              { position: pos.id as 'top' | 'middle' | 'bottom' },
+                              'Posición'
+                            )
+                          }
+                          className={`py-1 rounded text-[11px] font-medium border cursor-pointer transition-colors ${
+                            batchSampleStyle.position === pos.id
+                              ? 'border-indigo-500 bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 font-semibold'
+                              : 'border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400'
+                          }`}
+                        >
+                          {pos.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stroke & Background Toggles */}
+                <div className="flex items-center gap-2 pt-0.5">
+                  <button
+                    type="button"
+                    disabled={effectiveBatchIds.length === 0}
+                    onClick={() =>
+                      handleBatchStylePatch(
+                        { hasStroke: !batchSampleStyle.hasStroke },
+                        !batchSampleStyle.hasStroke ? 'Contorno activado' : 'Contorno desactivado'
+                      )
+                    }
+                    className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-medium border cursor-pointer transition-colors ${
+                      batchSampleStyle.hasStroke
+                        ? 'border-indigo-500 bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 font-semibold'
+                        : 'border-neutral-200 dark:border-neutral-800 text-neutral-500'
+                    }`}
+                  >
+                    Contorno: {batchSampleStyle.hasStroke ? 'Sí' : 'No'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={effectiveBatchIds.length === 0}
+                    onClick={() =>
+                      handleBatchStylePatch(
+                        { hasBackground: !batchSampleStyle.hasBackground },
+                        !batchSampleStyle.hasBackground ? 'Fondo activado' : 'Fondo desactivado'
+                      )
+                    }
+                    className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-medium border cursor-pointer transition-colors ${
+                      batchSampleStyle.hasBackground
+                        ? 'border-indigo-500 bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 font-semibold'
+                        : 'border-neutral-200 dark:border-neutral-800 text-neutral-500'
+                    }`}
+                  >
+                    Caja fondo: {batchSampleStyle.hasBackground ? 'Sí' : 'No'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 4. Batch Speaker & Delete */}
+              <div className="p-3 rounded-xl bg-white dark:bg-[#141620] border border-neutral-200/80 dark:border-neutral-800 space-y-2.5">
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    placeholder="Asignar locutor al lote..."
+                    value={batchSpeakerInput}
+                    onChange={(e) => setBatchSpeakerInput(e.target.value)}
+                    className="flex-1 px-2.5 py-1.5 rounded-lg bg-neutral-50 dark:bg-[#0c0d12] border border-neutral-200 dark:border-neutral-800 text-xs outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    disabled={effectiveBatchIds.length === 0}
+                    onClick={handleBatchSpeakerApply}
+                    className="px-2.5 py-1.5 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-950 text-xs font-semibold disabled:opacity-40 cursor-pointer whitespace-nowrap"
+                  >
+                    Aplicar
+                  </button>
+                </div>
+
+                {onBatchDeleteCues && effectiveBatchIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onBatchDeleteCues(effectiveBatchIds)}
+                    className="w-full py-1.5 px-3 rounded-lg bg-red-500/10 hover:bg-red-600 text-red-600 dark:text-red-400 hover:text-white border border-red-500/20 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Eliminar {effectiveBatchIds.length} bloques seleccionados</span>
+                  </button>
+                )}
+              </div>
             </div>
           ) : selectedCue ? (
             <div className="space-y-3">

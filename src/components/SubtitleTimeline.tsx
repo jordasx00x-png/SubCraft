@@ -17,9 +17,13 @@ interface SubtitleTimelineProps {
   duration: number;
   currentTime: number;
   selectedCueId?: string | number | null;
+  selectedCueIds?: Array<string | number>;
   onSeek: (time: number) => void;
   onAddCueAtTime: (time: number) => void;
-  onSelectCue: (cueId: string | number) => void;
+  onSelectCue: (
+    cueId: string | number,
+    modifiers?: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }
+  ) => void;
   onUpdateCue: (cue: SubtitleCue) => void;
   onDeleteCue?: (cueId: string | number) => void;
   onPause?: () => void;
@@ -30,6 +34,7 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   duration,
   currentTime,
   selectedCueId,
+  selectedCueIds = [],
   onSeek,
   onAddCueAtTime,
   onSelectCue,
@@ -119,11 +124,19 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
     mode: 'move' | 'resize-left' | 'resize-right'
   ) => {
     e.stopPropagation();
+    const hasMultiModifier = e.shiftKey || e.ctrlKey || e.metaKey;
+    onSelectCue(cue.id, {
+      shiftKey: e.shiftKey,
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+    });
+    if (hasMultiModifier && mode === 'move') {
+      return;
+    }
     setDraggingCueId(cue.id);
     setDragMode(mode);
     setDragStartX(e.clientX);
     setInitialCueTimes({ start: cue.start, end: cue.end });
-    onSelectCue(cue.id);
   };
 
   useEffect(() => {
@@ -185,8 +198,8 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
 
           <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">·</span>
 
-          <span className="text-[11px] font-mono text-neutral-500">
-            {subtitles.length} bloques
+          <span className="text-[11px] font-mono tabular-nums text-neutral-500">
+            {subtitles.length} bloques{selectedCueIds.length > 1 ? ` · ${selectedCueIds.length} sel.` : ''}
           </span>
 
           <div className="flex items-center bg-neutral-100 dark:bg-neutral-900 p-0.5 rounded border border-neutral-200 dark:border-neutral-800 ml-1">
@@ -296,9 +309,10 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
                 100 - leftPct,
                 Math.max(0.6, ((cue.end - cue.start) / safeDuration) * 100)
               );
-              const isSelected = selectedCueId !== null && selectedCueId !== undefined && String(cue.id) === String(selectedCueId);
+              const isPrimarySelected = selectedCueId !== null && selectedCueId !== undefined && String(cue.id) === String(selectedCueId);
+              const isInBatch = selectedCueIds.some((id) => String(id) === String(cue.id));
+              const isSelected = isPrimarySelected || isInBatch;
               const isAtPlayhead = currentTime >= cue.start && currentTime <= cue.end;
-              const isActive = isSelected || isAtPlayhead;
 
               return (
                 <div
@@ -309,11 +323,13 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
                     width: `${widthPct}%`,
                   }}
                   className={`absolute top-1.5 bottom-1.5 rounded-md border text-[11px] font-medium px-2 flex items-center justify-between overflow-hidden cursor-grab active:cursor-grabbing transition-colors ${
-                    isActive
+                    isInBatch && !isPrimarySelected
+                      ? 'bg-indigo-500 border-indigo-300 text-white font-semibold shadow-md z-10 ring-1 ring-indigo-300'
+                      : isSelected || isAtPlayhead
                       ? 'bg-amber-400 border-amber-300 text-neutral-950 font-bold shadow-lg z-10 ring-1 ring-amber-300'
                       : 'bg-indigo-600/35 border-indigo-400/40 text-indigo-100 hover:bg-indigo-600/55'
                   }`}
-                  title={`[${formatTimeDisplay(cue.start, true)} - ${formatTimeDisplay(cue.end, true)}] ${cue.text}`}
+                  title={`[${formatTimeDisplay(cue.start, true)} - ${formatTimeDisplay(cue.end, true)}] ${cue.text} (Shift/Ctrl+Clic para selección múltiple)`}
                 >
                   {/* Left Resize Handle */}
                   <div
