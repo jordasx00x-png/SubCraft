@@ -1159,7 +1159,8 @@ export default function App() {
             isPlaying={isPlaying}
             onTimeUpdate={handleTimeUpdate}
             onDurationChange={setDuration}
-            onPlayPauseToggle={() => setIsPlaying(!isPlaying)}
+            onPlayPauseToggle={() => setIsPlaying((prev) => !prev)}
+            onSetPlaying={setIsPlaying}
             onSeek={handleSeek}
             onUploadNewVideo={() => setShowAddVideoModal(true)}
             onLoadSampleVideo={handleLoadSampleVideo}

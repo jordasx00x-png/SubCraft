@@ -34,6 +34,7 @@ interface VideoPlayerProps {
   onTimeUpdate: (time: number) => void;
   onDurationChange: (duration: number) => void;
   onPlayPauseToggle: () => void;
+  onSetPlaying?: (playing: boolean) => void;
   onSeek: (time: number) => void;
   onUploadNewVideo: () => void;
   onLoadSampleVideo: () => void;
@@ -53,6 +54,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onTimeUpdate,
   onDurationChange,
   onPlayPauseToggle,
+  onSetPlaying,
   onSeek,
   onUploadNewVideo,
   onLoadSampleVideo,
@@ -69,6 +71,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [loopCurrentCue, setLoopCurrentCue] = useState<boolean>(false);
   const [isEditingOnScreen, setIsEditingOnScreen] = useState<boolean>(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+
+  const isSeekingRef = useRef<boolean>(false);
+  const isStartingPlayRef = useRef<boolean>(false);
+  const lastReportedTimeRef = useRef<number>(-1);
+  const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Ultra-smooth 60 FPS Background Loop Canvas animation for Audio Mode
   useEffect(() => {
@@ -116,24 +124,68 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => cancelAnimationFrame(animId);
   }, [style.isAudioMode, style.backgroundLoop, style.showAudioVisualizer, isPlaying, currentTime]);
 
+  // Clear error when media changes
+  useEffect(() => {
+    setPlaybackError(null);
+    lastReportedTimeRef.current = -1;
+  }, [videoUrl]);
+
+  const attemptVideoPlay = async () => {
+    const video = videoRef.current;
+    if (!video || !videoUrl || isStartingPlayRef.current) return;
+
+    if (video.ended || (Number.isFinite(video.duration) && video.duration > 0 && video.currentTime >= video.duration - 0.05)) {
+      video.currentTime = 0;
+      lastReportedTimeRef.current = 0;
+      onSeek(0);
+    }
+
+    isStartingPlayRef.current = true;
+    try {
+      await video.play();
+      setPlaybackError(null);
+    } catch (err: any) {
+      if (err?.name === 'NotAllowedError') {
+        // Autoplay policy blocked unmuted playback: retry muted so playback actually advances
+        try {
+          video.muted = true;
+          setIsMuted(true);
+          await video.play();
+          setPlaybackError(null);
+        } catch {
+          onSetPlaying?.(false);
+        }
+      } else if (err?.name !== 'AbortError') {
+        console.warn('Video play error:', err);
+        if (video.error || video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) {
+          setPlaybackError('No se pudo reproducir el archivo multimedia. Verifica el formato o vuelve a importarlo.');
+          onSetPlaying?.(false);
+        }
+      }
+    } finally {
+      isStartingPlayRef.current = false;
+    }
+  };
+
   // Sync internal video element with isPlaying state
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !videoUrl) return;
 
     if (isPlaying && video.paused) {
-      video.play().catch(() => {});
+      attemptVideoPlay();
     } else if (!isPlaying && !video.paused) {
       video.pause();
     }
-  }, [isPlaying]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, videoUrl]);
 
   // Sync internal playback rate
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.playbackRate = playbackRate;
     }
-  }, [playbackRate]);
+  }, [playbackRate, videoUrl]);
 
   // Sync volume & mute
   useEffect(() => {
@@ -141,23 +193,27 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       videoRef.current.volume = volume;
       videoRef.current.muted = isMuted;
     }
-  }, [volume, isMuted]);
+  }, [volume, isMuted, videoUrl]);
 
-  const isSeekingRef = useRef<boolean>(false);
-  const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Sync video element time when currentTime prop changes externally
+  // Sync video element time ONLY when currentTime changes externally (skip <video> own timeupdate echoes)
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (Math.abs(video.currentTime - currentTime) > 0.05) {
+
+    // Ignore updates that originated from the <video> element's own onTimeUpdate
+    if (Math.abs(currentTime - lastReportedTimeRef.current) < 0.002) {
+      return;
+    }
+
+    if (Math.abs(video.currentTime - currentTime) > 0.08) {
       isSeekingRef.current = true;
       video.currentTime = currentTime;
+      lastReportedTimeRef.current = currentTime;
 
       if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
       seekTimeoutRef.current = setTimeout(() => {
         isSeekingRef.current = false;
-      }, 220);
+      }, 180);
     }
   }, [currentTime]);
 
@@ -200,13 +256,42 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const handleTimeUpdate = () => {
     if (videoRef.current && !isSeekingRef.current) {
-      onTimeUpdate(videoRef.current.currentTime);
+      const t = videoRef.current.currentTime;
+      lastReportedTimeRef.current = t;
+      onTimeUpdate(t);
     }
   };
 
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
-      onDurationChange(videoRef.current.duration);
+      if (Number.isFinite(videoRef.current.duration) && videoRef.current.duration > 0) {
+        onDurationChange(videoRef.current.duration);
+      }
+      videoRef.current.playbackRate = playbackRate;
+      videoRef.current.volume = volume;
+      videoRef.current.muted = isMuted;
+    }
+  };
+
+  const handleDirectPlayPauseClick = () => {
+    if (!videoUrl) return;
+    const video = videoRef.current;
+    if (!isPlaying && video) {
+      if (video.ended || (Number.isFinite(video.duration) && video.duration > 0 && video.currentTime >= video.duration - 0.05)) {
+        video.currentTime = 0;
+        lastReportedTimeRef.current = 0;
+        onSeek(0);
+      }
+      // Trigger play synchronously inside user click gesture as well as toggling state
+      if (video.paused) {
+        attemptVideoPlay();
+      }
+      onSetPlaying ? onSetPlaying(true) : onPlayPauseToggle();
+    } else {
+      if (video && !video.paused) {
+        video.pause();
+      }
+      onSetPlaying ? onSetPlaying(false) : onPlayPauseToggle();
     }
   };
 
@@ -215,6 +300,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (videoRef.current) {
       videoRef.current.currentTime = target;
     }
+    lastReportedTimeRef.current = target;
     onSeek(target);
   };
 
@@ -222,6 +308,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (!videoRef.current) return;
     const target = Math.max(0, Math.min(duration, videoRef.current.currentTime + delta));
     videoRef.current.currentTime = target;
+    lastReportedTimeRef.current = target;
     onSeek(target);
   };
 
@@ -430,7 +517,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 {style.isAudioMode ? (
                   <canvas
                     ref={canvasRef}
-                    onClick={onPlayPauseToggle}
+                    onClick={handleDirectPlayPauseClick}
                     className="w-full h-full object-cover cursor-pointer"
                   />
                 ) : null}
@@ -438,16 +525,62 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <video
                   ref={videoRef}
                   src={videoUrl}
-                  onClick={onPlayPauseToggle}
+                  preload="auto"
+                  onClick={handleDirectPlayPauseClick}
                   onTimeUpdate={handleTimeUpdate}
                   onSeeked={handleTimeUpdate}
                   onLoadedMetadata={handleLoadedMetadata}
-                  onEnded={() => onPlayPauseToggle()}
-                  className={`w-full h-full object-contain cursor-pointer ${
-                    style.isAudioMode ? 'hidden' : 'block'
-                  }`}
+                  onCanPlay={() => {
+                    setPlaybackError(null);
+                    if (isPlaying && videoRef.current?.paused) {
+                      attemptVideoPlay();
+                    }
+                  }}
+                  onPlay={() => {
+                    if (!isPlaying) onSetPlaying?.(true);
+                  }}
+                  onPause={() => {
+                    if (
+                      isPlaying &&
+                      videoRef.current &&
+                      !videoRef.current.seeking &&
+                      !isStartingPlayRef.current &&
+                      !isSeekingRef.current
+                    ) {
+                      onSetPlaying?.(false);
+                    }
+                  }}
+                  onEnded={() => {
+                    if (onSetPlaying) {
+                      onSetPlaying(false);
+                    } else if (isPlaying) {
+                      onPlayPauseToggle();
+                    }
+                  }}
+                  onError={() => {
+                    setPlaybackError('Error al cargar este video o audio. Reimporta el archivo o usa el Demo.');
+                    onSetPlaying?.(false);
+                  }}
+                  className={
+                    style.isAudioMode
+                      ? 'opacity-0 pointer-events-none absolute w-px h-px'
+                      : 'w-full h-full object-contain cursor-pointer block'
+                  }
                   playsInline
                 />
+
+                {playbackError && (
+                  <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 bg-red-950/90 border border-red-500/40 text-red-200 text-[11px] font-medium px-3 py-1.5 rounded-lg shadow-xl flex items-center gap-2 max-w-[90%]">
+                    <span className="truncate">{playbackError}</span>
+                    <button
+                      type="button"
+                      onClick={onUploadNewVideo}
+                      className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white font-semibold shrink-0 cursor-pointer"
+                    >
+                      Cambiar
+                    </button>
+                  </div>
+                )}
 
                 {/* Live Subtitle Overlay */}
                 <div
@@ -557,7 +690,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           {/* Left: Play/Pause, Step, Loop, Timecode */}
           <div className="flex items-center gap-1.5">
             <button
-              onClick={onPlayPauseToggle}
+              onClick={handleDirectPlayPauseClick}
               disabled={!videoUrl}
               className="w-7 h-7 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-950 hover:opacity-90 flex items-center justify-center transition-all cursor-pointer disabled:opacity-40"
               title={isPlaying ? 'Pausar (Espacio)' : 'Reproducir (Espacio)'}
