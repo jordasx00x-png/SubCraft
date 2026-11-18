@@ -857,27 +857,42 @@ export default function App() {
 
   const handleSplitCue = (index: number) => {
     const cue = subtitles[index];
-    const words = cue.text.trim().split(/\s+/);
-    if (words.length <= 1) return;
+    if (!cue) return;
+    const words = cue.text.trim().split(/\s+/).filter(Boolean);
+    const hasPlayheadInside =
+      currentTime > cue.start + 0.25 && currentTime < cue.end - 0.25;
+    const splitTime = hasPlayheadInside
+      ? Math.round(currentTime * 100) / 100
+      : Math.round((cue.start + (cue.end - cue.start) / 2) * 100) / 100;
 
-    const midWordIdx = Math.ceil(words.length / 2);
-    const text1 = words.slice(0, midWordIdx).join(' ');
-    const text2 = words.slice(midWordIdx).join(' ');
-
-    const midTime = cue.start + (cue.end - cue.start) / 2;
+    let text1 = cue.text;
+    let text2 = cue.text;
+    if (words.length > 1) {
+      const ratio = hasPlayheadInside
+        ? (splitTime - cue.start) / Math.max(0.1, cue.end - cue.start)
+        : 0.5;
+      const midWordIdx = Math.min(
+        words.length - 1,
+        Math.max(1, Math.round(words.length * ratio))
+      );
+      text1 = words.slice(0, midWordIdx).join(' ');
+      text2 = words.slice(midWordIdx).join(' ');
+    }
 
     const cue1: SubtitleCue = {
       ...cue,
-      end: Math.round(midTime * 100) / 100,
+      end: splitTime,
       text: text1,
     };
 
+    const newId = Date.now();
     const cue2: SubtitleCue = {
-      id: Date.now(),
-      start: Math.round(midTime * 100) / 100,
+      id: newId,
+      start: splitTime,
       end: cue.end,
       text: text2,
       speaker: cue.speaker,
+      styleOverride: cue.styleOverride,
     };
 
     setSubtitles((prev) => {
@@ -885,6 +900,22 @@ export default function App() {
       updated.splice(index, 1, cue1, cue2);
       return updated;
     });
+    setSelectedCueId(newId);
+    setSelectedCueIds([newId]);
+  };
+
+  const handleDuplicateCue = (cue: SubtitleCue) => {
+    const cueDuration = Math.max(0.5, Math.round((cue.end - cue.start) * 100) / 100);
+    const newId = Date.now();
+    const duplicated: SubtitleCue = {
+      ...cue,
+      id: newId,
+      start: Math.round(cue.end * 100) / 100,
+      end: Math.round((cue.end + cueDuration) * 100) / 100,
+    };
+    handleAddCue(duplicated);
+    setSelectedCueId(newId);
+    setSelectedCueIds([newId]);
   };
 
   const handlePlaySpan = (start: number, _end: number) => {
@@ -1281,12 +1312,17 @@ export default function App() {
             subtitles={subtitles}
             duration={duration}
             currentTime={currentTime}
+            isPlaying={isPlaying}
             selectedCueId={selectedCueId}
             selectedCueIds={selectedCueIds}
+            onPlayPauseToggle={() => setIsPlaying((prev) => !prev)}
             onSeek={handleSeek}
             onPause={() => setIsPlaying(false)}
             onUpdateCue={handleUpdateCue}
             onDeleteCue={handleDeleteCue}
+            onBatchDeleteCues={handleBatchDeleteCues}
+            onSplitCue={handleSplitCue}
+            onDuplicateCue={handleDuplicateCue}
             onAddCueAtTime={(time) => {
               const newId = Date.now();
               handleAddCue({
@@ -1296,6 +1332,7 @@ export default function App() {
                 text: 'Nuevo subtítulo...',
               });
               setSelectedCueId(newId);
+              setSelectedCueIds([newId]);
               setCurrentTime(Math.round(time * 100) / 100 + 0.01);
               setIsPlaying(false);
             }}

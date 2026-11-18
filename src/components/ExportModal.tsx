@@ -43,8 +43,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [exportedVideoBlob, setExportedVideoBlob] = useState<Blob | null>(null);
   const [videoResolution, setVideoResolution] = useState<'1080p' | '720p' | 'original'>('1080p');
   const [exportError, setExportError] = useState<string | null>(null);
+  const [elapsedSec, setElapsedSec] = useState<number>(0);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const getVideoFileExtension = (mimeType: string) =>
+    mimeType.toLowerCase().includes('mp4') ? 'mp4' : 'webm';
 
   const sanitizedTitle = (projectTitle || 'subtitulos').replace(/[^a-zA-Z0-9_\-\u00C0-\u017F]/g, '_');
 
@@ -74,10 +78,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     if (!videoUrl) return;
     setIsExportingVideo(true);
     setExportProgress(0);
+    setElapsedSec(0);
     setExportError(null);
     setExportedVideoBlob(null);
 
     abortControllerRef.current = new AbortController();
+    const startTimeMs = performance.now();
+    const timerInterval = window.setInterval(() => {
+      setElapsedSec(Math.floor((performance.now() - startTimeMs) / 1000));
+    }, 500);
 
     try {
       const blob = await exportBurnedVideo(videoUrl, subtitles, style, {
@@ -92,19 +101,23 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         },
       });
 
+      setElapsedSec(Math.max(1, Math.round((performance.now() - startTimeMs) / 1000)));
       setExportProgress(100);
       setExportedVideoBlob(blob);
       setIsExportingVideo(false);
 
+      const ext = getVideoFileExtension(blob.type);
       // Trigger download smoothly without locking main UI thread
       setTimeout(() => {
-        downloadFile(blob, `${sanitizedTitle}_subtitulado.webm`, blob.type);
+        downloadFile(blob, `${sanitizedTitle}_subtitulado.${ext}`, blob.type);
       }, 300);
     } catch (err: any) {
       if (err.message !== 'Export was cancelled by user.') {
         setExportError(err?.message || 'Error al procesar el video quemado');
       }
       setIsExportingVideo(false);
+    } finally {
+      window.clearInterval(timerInterval);
     }
   };
 
@@ -278,10 +291,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
-                    Grabando video en alta resolución...
+                    Exportación acelerada en progreso...
                   </h3>
                   <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                    {exportStatusText || 'Renderizando fotogramas y quemando subtítulos estilizados'}
+                    {exportStatusText || 'Renderizando fotogramas con caché tipográfica y aceleración por hardware'}
                   </p>
                 </div>
 
@@ -293,8 +306,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   />
                 </div>
 
-                <div className="flex items-center justify-between text-xs font-mono text-neutral-500 dark:text-neutral-400 px-1">
-                  <span>{exportProgress}% completado</span>
+                <div className="flex items-center justify-between text-xs font-mono tabular-nums text-neutral-500 dark:text-neutral-400 px-1">
+                  <span>{exportProgress}% completado · {elapsedSec}s</span>
                   <span>{exportCurrentTime.toFixed(1)}s / {videoDuration.toFixed(1)}s</span>
                 </div>
 
@@ -316,7 +329,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     ¡Video renderizado con éxito!
                   </h3>
                   <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">
-                    Los subtítulos han quedado integrados permanentemente con la tipografía y estilo elegidos.
+                    Listo en {elapsedSec}s ({getVideoFileExtension(exportedVideoBlob.type).toUpperCase()} · {(exportedVideoBlob.size / (1024 * 1024)).toFixed(1)} MB) con nitidez completa.
                   </p>
                 </div>
 
@@ -324,14 +337,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   onClick={() =>
                     downloadFile(
                       exportedVideoBlob,
-                      `${sanitizedTitle}_subtitulado.webm`,
+                      `${sanitizedTitle}_subtitulado.${getVideoFileExtension(exportedVideoBlob.type)}`,
                       exportedVideoBlob.type
                     )
                   }
                   className="w-full py-2.5 px-4 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Volver a descargar archivo de video</span>
+                  <span>Volver a descargar video (.{getVideoFileExtension(exportedVideoBlob.type).toUpperCase()})</span>
                 </button>
               </div>
             ) : (
