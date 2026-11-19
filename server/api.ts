@@ -217,9 +217,10 @@ Guidelines:
 1. Divide speech into natural, readable subtitle cues (ideally 5 to 10 words per cue, maximum 14 words).
 2. Start and end timestamps must be in seconds with 2 decimal places (e.g. 1.25, 4.80).
 3. If offsetSeconds is provided (${offsetSeconds}), add this exact offset (${offsetSeconds}) to every start and end timestamp.
-4. Keep cues continuous and natural without large unnecessary gaps.
-5. Provide correct punctuation, capitalization, and speaker tags if discernible.
-6. Return strictly valid JSON with this structure:
+4. CRITICAL SILENCE & VOICE-ONSET RULE: NEVER start a subtitle at 0.00 or during silence/instrumental intros. Wait until the EXACT timestamp when human voice actually begins speaking or singing, and set "start" right at that voice onset.
+5. NEVER stretch or hold a subtitle open across silent pauses (> 0.50s without voice). End each cue shortly after speech finishes and leave true silence gaps empty until the voice resumes.
+6. Provide correct punctuation, capitalization, and speaker tags if discernible.
+7. Return strictly valid JSON with this structure:
 {
   "detectedLanguage": "string (e.g. Spanish, English, French, etc.)",
   "languageCode": "string (e.g. es, en, fr, etc.)",
@@ -514,11 +515,18 @@ interface WaveformBucketInput {
   peak: number;
 }
 
+interface SilenceRegionInput {
+  start: number;
+  end: number;
+  duration: number;
+}
+
 interface AutoAlignRequestBody {
   subtitles: AutoAlignCueInput[];
   duration: number;
   language?: string;
   speechSegments: SpeechBurstInput[];
+  silenceRegions?: SilenceRegionInput[];
   waveformPeaks: WaveformBucketInput[];
 }
 
@@ -529,6 +537,7 @@ apiRouter.post('/auto-align', async (req: Request, res: Response) => {
       duration,
       language = 'es',
       speechSegments = [],
+      silenceRegions = [],
       waveformPeaks = [],
     } = req.body as AutoAlignRequestBody;
 
@@ -561,13 +570,22 @@ apiRouter.post('/auto-align', async (req: Request, res: Response) => {
       peak: Math.round(s.peakEnergy),
     }));
 
-    const prompt = `You are an expert audiovisual subtitle timing engineer.
-Your task is to synchronize existing subtitle cues to the real spoken audio by analyzing the extracted audio waveform peaks and detected speech segments.
+    const compactSilences = (silenceRegions || []).map((s) => ({
+      start: Number(s.start.toFixed(2)),
+      end: Number(s.end.toFixed(2)),
+      dur: Number((s.duration ?? s.end - s.start).toFixed(2)),
+    }));
+
+    const prompt = `You are an expert audiovisual subtitle timing engineer specializing in Voice Activity Detection (VAD) and silence removal.
+Your task is to synchronize existing subtitle cues strictly to the real spoken audio, eliminating silent intros and silent gaps where no voice exists.
 
 Project language: ${language}
 Total audio duration: ${Number(duration || 60).toFixed(2)} seconds.
 
-Detected active speech bursts (start, end in seconds, avg & peak energy 0-100):
+SILENCE / NO-VOICE ZONES (start, end, dur in seconds — DO NOT start cues inside silence or hold cues open across these gaps):
+${JSON.stringify(compactSilences)}
+
+DETECTED ACTIVE VOICE SEGMENTS (start, end in seconds, avg & peak energy 0-100):
 ${JSON.stringify(compactSegments)}
 
 Waveform energy timeline as [time_sec, rms_0_to_100, peak_0_to_100]:
@@ -576,14 +594,15 @@ ${JSON.stringify(compactPeaks)}
 Existing subtitle cues to align (keep the exact same "id" values in the exact same chronological order):
 ${JSON.stringify(compactCues)}
 
-Alignment Rules:
-1. Match each subtitle cue to the corresponding speech activity / waveform peak burst in chronological order.
-2. Snap "start" to when speech energy begins rising for that phrase (the onset of the matching burst or peak), and snap "end" to when the phrase finishes before silence or the next phrase.
-3. When multiple consecutive cues fall inside one continuous speech burst, distribute their durations proportionally to their word count ("words") and natural speaking pace, anchored to local waveform dips/peaks inside that burst.
-4. Keep strict chronological order with zero overlaps: cue[i].start < cue[i].end <= cue[i+1].start <= ${Number(duration || 60).toFixed(2)}.
-5. Minimum cue duration is 0.40s unless the surrounding speech gap is smaller.
-6. Never drop, reorder, or merge cues — return exactly one aligned timing object for every input cue "id".
-7. Provide a concise 1-sentence "summary" in Spanish describing the alignment result.`;
+Strict Alignment Rules:
+1. NEVER place or start a subtitle inside a NO-VOICE / SILENCE ZONE! For example, if there is 5 seconds of silence from 0.00 to 5.00 before voice starts at 5.00, the subtitle MUST NOT start at 0.00 — move "start" forward to 5.00 where the voice actually begins!
+2. Match each subtitle cue to the corresponding ACTIVE VOICE SEGMENT in chronological order. Snap "start" tightly to the exact voice onset where energy rises, and snap "end" right after speech ends (max 0.15s tail) before any silence gap.
+3. If an input cue currently covers silence followed by speech (e.g. start=0.00, end=8.00 when silence is 0..5 and speech is 5..8), TRIM the silent beginning so the cue becomes start=5.00, end=8.00.
+4. When multiple consecutive cues fall inside one continuous active voice segment, distribute their durations proportionally to their word count ("words") and natural speaking pace, anchored to local waveform peaks inside that segment.
+5. Keep strict chronological order with zero overlaps: cue[i].start < cue[i].end <= cue[i+1].start <= ${Number(duration || 60).toFixed(2)}.
+6. Minimum cue duration is 0.40s unless the surrounding speech gap is smaller.
+7. Never drop, reorder, or merge cues — return exactly one aligned timing object for every input cue "id".
+8. Provide a concise 1-sentence "summary" in Spanish describing how cues were aligned to voice onsets and trimmed from silence.`;
 
     const alignSchema = {
       type: Type.OBJECT,
