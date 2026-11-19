@@ -254,28 +254,34 @@ export async function runAutoAlignSubtitles(options: {
 
   onProgress?.(72, 'Alineando bloques de subtítulos con Gemini IA...');
 
-  // Process in chunks of up to 75 cues so long videos remain fast and accurate
-  const CHUNK_SIZE = 75;
+  // Process in compact chunks of 30 cues so long projects stay fast and never hit HTTP timeouts
+  const CHUNK_SIZE = 30;
   const alignedMap = new Map<string, { start: number; end: number }>();
   let lastSummary = '';
 
   for (let offset = 0; offset < subtitles.length; offset += CHUNK_SIZE) {
     const chunk = subtitles.slice(offset, offset + CHUNK_SIZE);
-    const minT = Math.max(0, chunk[0].start - 20);
-    const maxT = Math.min(actualDuration, chunk[chunk.length - 1].end + 20);
+    const batchStartIdx = offset + 1;
+    const batchEndIdx = Math.min(subtitles.length, offset + chunk.length);
+    const progressPct = 70 + Math.round((offset / Math.max(1, subtitles.length)) * 22);
+    onProgress?.(
+      progressPct,
+      `Alineando bloques ${batchStartIdx}–${batchEndIdx} de ${subtitles.length} con Gemini IA...`
+    );
 
-    // Filter waveform peaks & speech bursts around this chunk window (or include wider window if offsets are shifted)
+    const minT = Math.max(0, chunk[0].start - 15);
+    const maxT = Math.min(actualDuration, chunk[chunk.length - 1].end + 15);
+
     let windowPeaks = analysis.waveformPeaks.filter((p) => p.t >= minT && p.t <= maxT);
     let windowSegments = analysis.speechSegments.filter((s) => s.end >= minT && s.start <= maxT);
 
-    // If chunk is small/entire project fits, or window looks sparse, include full timeline compressed
-    if (subtitles.length <= CHUNK_SIZE || windowSegments.length < Math.max(2, Math.floor(chunk.length / 4))) {
-      // Downsample peaks to max ~900 points for prompt compactness
-      const step = Math.max(1, Math.ceil(analysis.waveformPeaks.length / 900));
+    // If window looks sparse (e.g., heavily desynchronized cues), fall back to full compressed waveform
+    if (windowSegments.length < Math.max(2, Math.floor(chunk.length / 5))) {
+      const step = Math.max(1, Math.ceil(analysis.waveformPeaks.length / 450));
       windowPeaks = analysis.waveformPeaks.filter((_, idx) => idx % step === 0);
       windowSegments = analysis.speechSegments;
-    } else if (windowPeaks.length > 750) {
-      const step = Math.ceil(windowPeaks.length / 750);
+    } else if (windowPeaks.length > 450) {
+      const step = Math.ceil(windowPeaks.length / 450);
       windowPeaks = windowPeaks.filter((_, idx) => idx % step === 0);
     }
 
@@ -293,7 +299,9 @@ export async function runAutoAlignSubtitles(options: {
 
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json.success) {
-      throw new Error(json.error || 'Error del servidor al ejecutar la alineación automática con IA.');
+      throw new Error(
+        json.error || `Error del servidor (${res.status}) al ejecutar la alineación automática con IA.`
+      );
     }
 
     if (json.data?.summary) {

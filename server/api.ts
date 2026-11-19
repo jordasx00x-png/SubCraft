@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { Type } from '@google/genai';
+import { ThinkingLevel, Type } from '@google/genai';
 import { ai } from './gemini.ts';
 import { getYouTubeVideoInfo, streamYouTubeVideo } from './youtube.ts';
 
@@ -550,50 +550,98 @@ Alignment Rules:
 6. Never drop, reorder, or merge cues — return exactly one aligned timing object for every input cue "id".
 7. Provide a concise 1-sentence "summary" in Spanish describing the alignment result.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
-      contents: prompt,
-      config: {
-        systemInstruction:
-          'You align subtitle start/end timestamps to speech waveform peaks with frame-level precision. Return strictly valid JSON matching the schema.',
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            summary: {
-              type: Type.STRING,
-              description: 'Brief 1-sentence summary in Spanish of the alignment adjustment.',
-            },
-            alignedCues: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  id: {
-                    type: Type.STRING,
-                    description: 'Exact original cue id.',
-                  },
-                  start: {
-                    type: Type.NUMBER,
-                    description: 'Aligned start timestamp in seconds.',
-                  },
-                  end: {
-                    type: Type.NUMBER,
-                    description: 'Aligned end timestamp in seconds.',
-                  },
-                },
-                required: ['id', 'start', 'end'],
+    const alignSchema = {
+      type: Type.OBJECT,
+      properties: {
+        summary: {
+          type: Type.STRING,
+          description: 'Brief 1-sentence summary in Spanish of the alignment adjustment.',
+        },
+        alignedCues: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              id: {
+                type: Type.STRING,
+                description: 'Exact original cue id.',
+              },
+              start: {
+                type: Type.NUMBER,
+                description: 'Aligned start timestamp in seconds.',
+              },
+              end: {
+                type: Type.NUMBER,
+                description: 'Aligned end timestamp in seconds.',
               },
             },
+            required: ['id', 'start', 'end'],
           },
-          required: ['summary', 'alignedCues'],
         },
       },
-    });
+      required: ['summary', 'alignedCues'],
+    };
+
+    const modelsToTry: Array<{ model: string; thinkingLevel: ThinkingLevel }> = [
+      { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
+      { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
+      { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.LOW },
+    ];
+
+    let response: any = null;
+    let lastErr: any = null;
+
+    for (let attempt = 0; attempt < modelsToTry.length; attempt++) {
+      const { model, thinkingLevel } = modelsToTry[attempt];
+      try {
+        const generatePromise = ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            systemInstruction:
+              'You align subtitle start/end timestamps to speech waveform peaks with frame-level precision. Return strictly valid JSON matching the schema.',
+            thinkingConfig: { thinkingLevel },
+            responseMimeType: 'application/json',
+            responseSchema: alignSchema,
+          },
+        });
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`Timeout calling ${model}`)), 12000)
+        );
+        response = await Promise.race([generatePromise, timeoutPromise]);
+        break;
+      } catch (err: any) {
+        lastErr = err;
+        const msg = String(err?.message || '');
+        const status = Number(err?.status || err?.code || 0);
+        const isTransient =
+          status === 503 ||
+          status === 429 ||
+          status === 500 ||
+          msg.includes('503') ||
+          msg.includes('UNAVAILABLE') ||
+          msg.includes('high demand') ||
+          msg.includes('RESOURCE_EXHAUSTED') ||
+          msg.includes('Timeout');
+
+        if (!isTransient || attempt === modelsToTry.length - 1) {
+          throw err;
+        }
+        await new Promise((r) => setTimeout(r, 350));
+      }
+    }
+
+    if (!response) {
+      throw lastErr || new Error('No se obtuvo respuesta del modelo de IA.');
+    }
 
     const outputText = (response.text ?? '{}').trim();
     const cleaned = outputText.replace(/^```json\s*/gm, '').replace(/```\s*$/gm, '').trim();
-    const parsed = JSON.parse(cleaned);
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    const jsonSlice =
+      firstBrace !== -1 && lastBrace !== -1 ? cleaned.substring(firstBrace, lastBrace + 1) : cleaned;
+    const parsed = JSON.parse(jsonSlice);
 
     if (!parsed || !Array.isArray(parsed.alignedCues)) {
       return res.status(502).json({
@@ -608,10 +656,17 @@ Alignment Rules:
     });
   } catch (error: any) {
     console.error('Error in /api/auto-align:', error);
-    const statusCode = typeof error?.status === 'number' ? error.status : 500;
+    const rawMsg = String(error?.message || '');
+    const statusCode = typeof error?.status === 'number' && error.status >= 400 ? error.status : 500;
+    let friendlyError = rawMsg || 'Error al alinear subtítulos con la onda de audio en IA.';
+    if (rawMsg.includes('API_KEY_INVALID') || rawMsg.includes('PERMISSION_DENIED')) {
+      friendlyError = 'La clave API de Gemini no es válida o falta en Settings > Secrets.';
+    } else if (rawMsg.includes('503') || rawMsg.includes('UNAVAILABLE') || rawMsg.includes('high demand')) {
+      friendlyError = 'El servicio de IA está saturado temporalmente (503). Intenta nuevamente en unos segundos.';
+    }
     return res.status(statusCode).json({
       success: false,
-      error: error?.message || 'Error al alinear subtítulos con la onda de audio en IA.',
+      error: friendlyError,
     });
   }
 });

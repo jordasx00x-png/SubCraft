@@ -264,7 +264,8 @@ interface SupportedCodecConfig {
 async function detectWebCodecsConfig(
   width: number,
   height: number,
-  bitrate: number
+  bitrate: number,
+  framerate: number
 ): Promise<SupportedCodecConfig | null> {
   if (
     typeof VideoEncoder === 'undefined' ||
@@ -274,8 +275,8 @@ async function detectWebCodecsConfig(
     return null;
   }
 
-  // 1. Prefer MP4 (H.264 + AAC) with hardware acceleration first for fastest encoding + universal playback
-  const h264Candidates = ['avc1.640028', 'avc1.4d002a', 'avc1.420028', 'avc1.42001f'];
+  // 1. Prefer MP4 (H.264 Main/Baseline/High + AAC), hardware-accelerated first with realtime latencyMode for max throughput
+  const h264Candidates = ['avc1.4d002a', 'avc1.420028', 'avc1.640028', 'avc1.42001f'];
   const hwModes: HardwareAcceleration[] = ['prefer-hardware', 'no-preference'];
 
   for (const hw of hwModes) {
@@ -286,7 +287,9 @@ async function detectWebCodecsConfig(
           width,
           height,
           bitrate,
-          framerate: 30,
+          framerate,
+          bitrateMode: 'variable',
+          latencyMode: 'realtime',
           hardwareAcceleration: hw,
         });
         if (!vSupport.supported) continue;
@@ -314,7 +317,7 @@ async function detectWebCodecsConfig(
     }
   }
 
-  // 2. Fallback to WebCodecs WebM (VP8 hardware/software is much faster than VP9, then VP9)
+  // 2. Fallback to WebCodecs WebM (VP8 realtime is drastically faster than VP9)
   const webmCandidates: Array<{ codec: string; muxer: 'V_VP8' | 'V_VP9' }> = [
     { codec: 'vp8', muxer: 'V_VP8' },
     { codec: 'vp09.00.10.08', muxer: 'V_VP9' },
@@ -328,7 +331,9 @@ async function detectWebCodecsConfig(
           width,
           height,
           bitrate,
-          framerate: 30,
+          framerate,
+          bitrateMode: 'variable',
+          latencyMode: 'realtime',
           hardwareAcceleration: hw,
         });
         if (!vSupport.supported) continue;
@@ -360,7 +365,7 @@ async function detectWebCodecsConfig(
 }
 
 /**
- * Decodes source media audio offline and resamples to target sample rate / stereo for clean WebCodecs AudioEncoder input
+ * Decodes source media audio offline and resamples to 48kHz only if sampleRate differs (avoids expensive OfflineAudioContext when already 48kHz).
  */
 async function decodeAudioToStereo48k(
   videoSourceUrl: string,
@@ -370,13 +375,14 @@ async function decodeAudioToStereo48k(
   const arrayBuffer = await response.arrayBuffer();
   if (abortSignal?.aborted) throw new Error('Export was cancelled by user.');
 
-  const AudioCtxClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  const AudioCtxClass =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   const tempCtx = new AudioCtxClass();
   let decoded: AudioBuffer;
   try {
     decoded = await tempCtx.decodeAudioData(arrayBuffer);
   } catch {
-    // Source may have no audio stream
     return null;
   } finally {
     if (tempCtx.state !== 'closed') {
@@ -388,8 +394,11 @@ async function decodeAudioToStereo48k(
     return null;
   }
 
-  // Already 48kHz stereo/mono -> resample cleanly to 48kHz stereo so AAC/Opus encoder always matches
   const targetSampleRate = 48000;
+  if (decoded.sampleRate === targetSampleRate) {
+    return decoded;
+  }
+
   const targetLength = Math.ceil(decoded.duration * targetSampleRate);
   const offlineCtx = new OfflineAudioContext(2, targetLength, targetSampleRate);
   const source = offlineCtx.createBufferSource();
@@ -397,6 +406,36 @@ async function decodeAudioToStereo48k(
   source.connect(offlineCtx.destination);
   source.start(0);
   return await offlineCtx.startRendering();
+}
+
+function waitForEncoderQueue(
+  encoder: AudioEncoder | VideoEncoder,
+  maxQueue: number
+): Promise<void> {
+  if (encoder.encodeQueueSize <= maxQueue || encoder.state !== 'configured') {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      encoder.ondequeue = null;
+      resolve();
+    };
+    const timer = setTimeout(finish, 40);
+    encoder.ondequeue = () => {
+      if (encoder.encodeQueueSize <= maxQueue || encoder.state !== 'configured') {
+        finish();
+      }
+    };
+    queueMicrotask(() => {
+      if (encoder.encodeQueueSize <= maxQueue || encoder.state !== 'configured') {
+        finish();
+      }
+    });
+  });
 }
 
 async function encodeOfflineAudioTrack(
@@ -423,7 +462,8 @@ async function encodeOfflineAudioTrack(
   const left = audioBuffer.getChannelData(0);
   const right = audioBuffer.numberOfChannels > 1 ? audioBuffer.getChannelData(1) : left;
   const totalFrames = audioBuffer.length;
-  const chunkFrames = 4096;
+  const chunkFrames = 16384;
+  const reusablePlanar = new Float32Array(chunkFrames * 2);
 
   for (let offset = 0; offset < totalFrames; offset += chunkFrames) {
     if (abortSignal?.aborted) {
@@ -433,9 +473,9 @@ async function encodeOfflineAudioTrack(
     if (encoderError) throw encoderError;
 
     const count = Math.min(chunkFrames, totalFrames - offset);
-    const planarData = new Float32Array(count * 2);
-    planarData.set(left.subarray(offset, offset + count), 0);
-    planarData.set(right.subarray(offset, offset + count), count);
+    const bufferSlice = count === chunkFrames ? reusablePlanar : new Float32Array(count * 2);
+    bufferSlice.set(left.subarray(offset, offset + count), 0);
+    bufferSlice.set(right.subarray(offset, offset + count), count);
 
     const timestampUs = Math.round((offset / audioBuffer.sampleRate) * 1_000_000);
     const audioData = new AudioData({
@@ -444,15 +484,14 @@ async function encodeOfflineAudioTrack(
       numberOfFrames: count,
       numberOfChannels: 2,
       timestamp: timestampUs,
-      data: planarData,
+      data: bufferSlice,
     });
 
     audioEncoder.encode(audioData);
     audioData.close();
 
-    // Yield periodically to keep browser UI responsive & respect queue backpressure
-    if (audioEncoder.encodeQueueSize > 16) {
-      await new Promise((r) => setTimeout(r, 2));
+    if (audioEncoder.encodeQueueSize > 32) {
+      await waitForEncoderQueue(audioEncoder, 16);
     }
   }
 
@@ -461,13 +500,22 @@ async function encodeOfflineAudioTrack(
   if (encoderError) throw encoderError;
 }
 
-function yieldFrame(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+// Zero-clamp event-loop yield using MessageChannel (avoids 4ms-16ms browser setTimeout clamping!)
+function createFastYielder() {
+  if (typeof MessageChannel === 'undefined') {
+    return () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+  const channel = new MessageChannel();
+  return () =>
+    new Promise<void>((resolve) => {
+      channel.port1.onmessage = () => resolve();
+      channel.port2.postMessage(null);
+    });
 }
 
 /**
- * Accelerated WebCodecs export pipeline (10x–30x faster in Audio Mode offline loop,
- * 2.5x–3x faster in Video Mode via accelerated requestVideoFrameCallback + offline audio).
+ * Accelerated WebCodecs export pipeline with realtime encoder tuning, zero-clamp queue backpressure,
+ * offscreen low-res background buffer (preserving sharp 1080p subtitles), and offline audio encoding.
  */
 async function exportWithWebCodecs(
   video: HTMLVideoElement,
@@ -478,23 +526,23 @@ async function exportWithWebCodecs(
   style: SubtitleStyle,
   codecConfig: SupportedCodecConfig,
   bitrate: number,
+  fps: number,
   isAudioOnly: boolean,
   options: VideoExportOptions
 ): Promise<Blob> {
   const { onProgress, onStatusChange, abortSignal } = options;
   const duration = video.duration > 0 ? video.duration : 10;
-  const fps = 30;
 
   let lastProgressReportMs = 0;
   const reportProgressThrottled = (percent: number, curTime: number) => {
     const now = performance.now();
-    if (now - lastProgressReportMs >= 100 || percent >= 99) {
+    if (now - lastProgressReportMs >= 150 || percent >= 99) {
       lastProgressReportMs = now;
       onProgress?.(Math.min(99, Math.max(0, Math.round(percent))), curTime, duration);
     }
   };
 
-  onStatusChange?.('Decodificando audio en memoria para sincronización perfecta...');
+  onStatusChange?.('Decodificando pista de audio...');
   const audioBuffer = await decodeAudioToStereo48k(videoSourceUrl, abortSignal);
   const hasAudio = Boolean(audioBuffer);
 
@@ -543,9 +591,8 @@ async function exportWithWebCodecs(
       })
     : null;
 
-  // Step 1: Encode audio offline first (ultra fast, exact timestamps)
   if (hasAudio && audioBuffer) {
-    onStatusChange?.('Codificando pista de audio HD...');
+    onStatusChange?.('Codificando audio HD...');
     await encodeOfflineAudioTrack(
       audioBuffer,
       codecConfig.audioCodec,
@@ -559,7 +606,6 @@ async function exportWithWebCodecs(
 
   if (abortSignal?.aborted) throw new Error('Export was cancelled by user.');
 
-  // Step 2: Configure hardware VideoEncoder
   let videoEncoderError: unknown = null;
   const videoEncoder = new VideoEncoder({
     output: (chunk, meta) => {
@@ -577,6 +623,8 @@ async function exportWithWebCodecs(
     height: canvas.height,
     bitrate,
     framerate: fps,
+    bitrateMode: 'variable',
+    latencyMode: 'realtime',
     hardwareAcceleration: codecConfig.hardwareAcceleration,
     avc: isMp4 ? { format: 'avc' } : undefined,
   });
@@ -586,10 +634,22 @@ async function exportWithWebCodecs(
   const bgLoop = style.backgroundLoop || 'aurora-gradient';
 
   if (isAudioOnly) {
-    // Pure offline rendering loop: 10x–30x faster than realtime!
-    onStatusChange?.('Renderizando fotogramas offline con aceleración GPU (modo turbo)...');
+    onStatusChange?.('Renderizando video HD en modo turbo...');
+
+    // Draw fluid animated background at reduced resolution (9x-16x faster fill) and composite crisp full-HD subtitles on top
+    const isVectorBg = bgLoop === 'synthwave-grid' || bgLoop === 'sound-spectrum';
+    const bgScaleDivisor = isVectorBg ? 2 : 4;
+    const bgCanvas = document.createElement('canvas');
+    bgCanvas.width = Math.max(320, Math.round(canvas.width / bgScaleDivisor));
+    bgCanvas.height = Math.max(180, Math.round(canvas.height / bgScaleDivisor));
+    const bgCtx = bgCanvas.getContext('2d', { alpha: false })!;
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'medium';
+
+    const yieldFast = createFastYielder();
     const totalFrames = Math.max(1, Math.ceil(duration * fps));
-    const keyframeInterval = fps * 2; // keyframe every 2 seconds
+    const keyframeInterval = fps * 2;
 
     for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
       if (abortSignal?.aborted) {
@@ -598,9 +658,8 @@ async function exportWithWebCodecs(
       }
       if (videoEncoderError) throw videoEncoderError;
 
-      // Backpressure wait so encoder queue stays bounded
-      while (videoEncoder.encodeQueueSize > 8) {
-        await new Promise((r) => setTimeout(r, 3));
+      if (videoEncoder.encodeQueueSize > 20) {
+        await waitForEncoderQueue(videoEncoder, 10);
         if (abortSignal?.aborted) {
           videoEncoder.close();
           throw new Error('Export was cancelled by user.');
@@ -608,9 +667,11 @@ async function exportWithWebCodecs(
       }
 
       const tSec = frameIdx / fps;
-      drawBackgroundLoop(ctx, canvas.width, canvas.height, bgLoop, tSec, {
+      drawBackgroundLoop(bgCtx, bgCanvas.width, bgCanvas.height, bgLoop, tSec, {
         showVisualizer: style.showAudioVisualizer,
+        fastMode: true,
       });
+      ctx.drawImage(bgCanvas, 0, 0, canvas.width, canvas.height);
 
       const activeCue = findActiveCue(sortedCues, tSec);
       subtitleCache.composite(ctx, activeCue);
@@ -625,25 +686,24 @@ async function exportWithWebCodecs(
 
       reportProgressThrottled((frameIdx / totalFrames) * 98, tSec);
 
-      // Yield to UI event loop every 6 frames
-      if (frameIdx % 6 === 5) {
-        await yieldFrame();
+      // Yield briefly every 15 frames via MessageChannel (no 4ms setTimeout clamp!)
+      if (frameIdx % 15 === 14) {
+        await yieldFast();
       }
     }
   } else {
-    // Video source mode: accelerated muted playback + requestVideoFrameCallback + exact mediaTime timestamps
-    onStatusChange?.('Renderizando video acelerado por hardware con subtítulos quemados...');
+    onStatusChange?.('Renderizando video acelerado con subtítulos quemados...');
 
     await new Promise<void>((resolveVideo, rejectVideo) => {
       video.muted = true;
       video.currentTime = 0;
 
-      // Run at 3x playback speed; scale down dynamically if encoder queue fills up
-      let currentSpeed = 3.0;
+      // Run accelerated playback up to 4x; scale down only under heavy queue pressure
+      let currentSpeed = 4.0;
       try {
         video.playbackRate = currentSpeed;
       } catch {
-        currentSpeed = 1.5;
+        currentSpeed = 2.0;
         video.playbackRate = currentSpeed;
       }
 
@@ -687,17 +747,16 @@ async function exportWithWebCodecs(
           return;
         }
 
-        // Dynamic playbackRate backpressure control so frames never drop
         const qSize = videoEncoder.encodeQueueSize;
-        if (qSize > 10 && currentSpeed > 1.25) {
-          currentSpeed = 1.25;
+        if (qSize > 24 && currentSpeed > 1.5) {
+          currentSpeed = 1.5;
           try {
             video.playbackRate = currentSpeed;
           } catch {
             // ignore
           }
-        } else if (qSize < 4 && currentSpeed < 3.0) {
-          currentSpeed = 3.0;
+        } else if (qSize < 8 && currentSpeed < 4.0) {
+          currentSpeed = 4.0;
           try {
             video.playbackRate = currentSpeed;
           } catch {
@@ -780,7 +839,7 @@ async function exportWithWebCodecs(
     });
   }
 
-  onStatusChange?.('Empaquetando pista de video y audio en archivo final...');
+  onStatusChange?.('Empaquetando video y audio en archivo final...');
   await videoEncoder.flush();
   videoEncoder.close();
   if (videoEncoderError) throw videoEncoderError;
@@ -798,7 +857,7 @@ async function exportWithWebCodecs(
 
 /**
  * Fallback pipeline using optimized MediaRecorder (VP8 hardware-friendly prioritized over CPU VP9,
- * cached subtitle overlay canvas, binary cue search, and 100ms throttled UI progress).
+ * cached subtitle overlay canvas, binary cue search, and 150ms throttled UI progress).
  */
 async function exportWithMediaRecorder(
   video: HTMLVideoElement,
@@ -816,7 +875,9 @@ async function exportWithMediaRecorder(
     let animationFrameId = 0;
     const recordedChunks: Blob[] = [];
 
-    const AudioCtxClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const AudioCtxClass =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     const audioCtx = new AudioCtxClass();
     const audioSource = audioCtx.createMediaElementSource(video);
     const audioDest = audioCtx.createMediaStreamDestination();
@@ -827,13 +888,12 @@ async function exportWithMediaRecorder(
     audioSource.connect(gainNode);
     gainNode.connect(audioCtx.destination);
 
-    const canvasStream = canvas.captureStream(30);
+    const canvasStream = canvas.captureStream(24);
     const combinedStream = new MediaStream([
       ...canvasStream.getVideoTracks(),
       ...audioDest.stream.getAudioTracks(),
     ]);
 
-    // Prioritize fast VP8/H.264 before heavy software VP9
     const mimeTypes = [
       'video/webm;codecs=vp8,opus',
       'video/webm;codecs=h264,opus',
@@ -887,7 +947,7 @@ async function exportWithMediaRecorder(
     const subtitleCache = new SubtitleOverlayCache(canvas.width, canvas.height, style);
     const isAudioOnly = style.isAudioMode || !video.videoWidth;
     const bgLoop = style.backgroundLoop || 'aurora-gradient';
-    const minFrameMs = 1000 / 30;
+    const minFrameMs = 1000 / 24;
     let lastDrawMs = 0;
     let lastProgressMs = 0;
 
@@ -912,6 +972,7 @@ async function exportWithMediaRecorder(
         if (isAudioOnly) {
           drawBackgroundLoop(ctx, canvas.width, canvas.height, bgLoop, curTime, {
             showVisualizer: style.showAudioVisualizer,
+            fastMode: true,
           });
         } else {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -920,7 +981,7 @@ async function exportWithMediaRecorder(
         const activeCue = findActiveCue(sortedCues, curTime);
         subtitleCache.composite(ctx, activeCue);
 
-        if (nowMs - lastProgressMs >= 100) {
+        if (nowMs - lastProgressMs >= 150) {
           lastProgressMs = nowMs;
           const percent = Math.min(99, Math.round((curTime / video.duration) * 100));
           onProgress?.(percent, curTime, video.duration);
@@ -944,7 +1005,7 @@ async function exportWithMediaRecorder(
 
 /**
  * Export high-resolution video with burned-in subtitles.
- * Uses hardware-accelerated WebCodecs (MP4 H.264+AAC / WebM) when supported for 3x–30x faster export,
+ * Uses hardware/realtime-tuned WebCodecs (MP4 H.264+AAC / WebM) for ultra-fast export,
  * falling back cleanly to optimized MediaRecorder.
  */
 export async function exportBurnedVideo(
@@ -1017,10 +1078,10 @@ export async function exportBurnedVideo(
     }
 
     const sortedCues = [...subtitles].sort((a, b) => a.start - b.start);
-    const bitrate = targetHeight >= 1080 ? 8_000_000 : 5_000_000;
+    const bitrate = targetHeight >= 1080 ? 6_000_000 : 3_500_000;
+    const fps = isAudioOnly ? 24 : 30;
 
-    // Try fast WebCodecs path first; if unsupported or fails before outputting, fallback to MediaRecorder
-    const webCodecsConfig = await detectWebCodecsConfig(width, height, bitrate);
+    const webCodecsConfig = await detectWebCodecsConfig(width, height, bitrate, fps);
     if (webCodecsConfig) {
       try {
         return await exportWithWebCodecs(
@@ -1032,6 +1093,7 @@ export async function exportBurnedVideo(
           style,
           webCodecsConfig,
           bitrate,
+          fps,
           isAudioOnly,
           options
         );

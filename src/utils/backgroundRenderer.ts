@@ -13,6 +13,7 @@ export function drawBackgroundLoop(
   options?: {
     showVisualizer?: boolean;
     customVideoElement?: HTMLVideoElement | null;
+    fastMode?: boolean;
   }
 ) {
   ctx.save();
@@ -30,7 +31,7 @@ export function drawBackgroundLoop(
 
   switch (loopType) {
     case 'synthwave-grid':
-      drawSynthwaveGrid(ctx, width, height, timeSec);
+      drawSynthwaveGrid(ctx, width, height, timeSec, Boolean(options?.fastMode));
       break;
     case 'cosmic-nebula':
       drawCosmicNebula(ctx, width, height, timeSec);
@@ -116,7 +117,8 @@ function drawSynthwaveGrid(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
-  t: number
+  t: number,
+  fastMode = false
 ) {
   // Dark purple sky
   const sky = ctx.createLinearGradient(0, 0, 0, h * 0.6);
@@ -165,33 +167,35 @@ function drawSynthwaveGrid(
   ctx.fillStyle = ground;
   ctx.fillRect(0, h * 0.55, w, h * 0.45);
 
-  // Moving Perspective Grid
+  // Moving Perspective Grid (skip expensive Gaussian shadowBlur during fast export)
   ctx.strokeStyle = '#ec4899';
-  ctx.lineWidth = 1.5;
-  ctx.shadowColor = '#ec4899';
-  ctx.shadowBlur = 8;
+  ctx.lineWidth = fastMode ? 1.75 : 1.5;
+  if (!fastMode) {
+    ctx.shadowColor = '#ec4899';
+    ctx.shadowBlur = 8;
+  }
 
   const horizonY = h * 0.55;
   const numVLines = 24;
+  ctx.beginPath();
   for (let i = -numVLines; i <= numVLines; i++) {
     const xBottom = w / 2 + (i * w * 1.5) / numVLines;
-    ctx.beginPath();
     ctx.moveTo(w / 2, horizonY);
     ctx.lineTo(xBottom, h);
-    ctx.stroke();
   }
+  ctx.stroke();
 
   // Horizontal moving lines (exponential perspective)
   const speed = (t * 0.8) % 1;
   const numHLines = 12;
+  ctx.beginPath();
   for (let i = 0; i < numHLines; i++) {
     const p = Math.pow((i + speed) / numHLines, 2.2);
     const lineY = horizonY + p * (h - horizonY);
-    ctx.beginPath();
     ctx.moveTo(0, lineY);
     ctx.lineTo(w, lineY);
-    ctx.stroke();
   }
+  ctx.stroke();
   ctx.shadowBlur = 0;
 }
 
@@ -238,22 +242,17 @@ function drawCosmicNebula(
   ctx.fillStyle = neb2;
   ctx.fillRect(0, 0, w, h);
 
-  // Twinkling stars (deterministic based on index)
+  // Twinkling stars (deterministic based on index, no redundant save/restore per star)
   ctx.fillStyle = '#ffffff';
   const starCount = 60;
   for (let i = 0; i < starCount; i++) {
     const seedX = (Math.sin(i * 123.45) * 0.5 + 0.5) * w;
     const seedY = ((Math.cos(i * 678.9) * 0.5 + 0.5) * h + t * (10 + (i % 15))) % h;
     const size = 1 + (i % 3);
-    const alpha = 0.3 + 0.7 * Math.abs(Math.sin(t * 2 + i));
-
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.beginPath();
-    ctx.arc(seedX, seedY, size, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    ctx.globalAlpha = 0.3 + 0.7 * Math.abs(Math.sin(t * 2 + i));
+    ctx.fillRect(seedX - size, seedY - size, size * 2, size * 2);
   }
+  ctx.globalAlpha = 1;
 }
 
 /**
