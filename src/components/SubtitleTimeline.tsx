@@ -80,6 +80,15 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   const [isScrubbingPlayhead, setIsScrubbingPlayhead] = useState<boolean>(false);
   const [snapGuideTime, setSnapGuideTime] = useState<number | null>(null);
 
+  // Waveform hand-drag stretch/shrink zoom state
+  const [waveformDrag, setWaveformDrag] = useState<{
+    startX: number;
+    startZoom: number;
+    anchorRatio: number;
+    anchorViewportOffset: number;
+  } | null>(null);
+  const waveformMovedRef = useRef<boolean>(false);
+
   // Dragging / Resizing cue state
   const [draggingCueId, setDraggingCueId] = useState<string | number | null>(null);
   const [dragMode, setDragMode] = useState<'move' | 'resize-left' | 'resize-right' | null>(null);
@@ -285,12 +294,71 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
     onPause?.();
   };
 
-  const handleTrackDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    // Double-click empty track area inserts a new cue directly at clicked time
-    const mapped = clientXToTime(e.clientX);
-    if (!mapped) return;
-    onAddCueAtTime(Math.round(mapped.time * 100) / 100);
+  // Grab waveform with the hand cursor and drag right to stretch or left to shrink the timeline
+  const handleWaveformMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const scroller = scrollContainerRef.current;
+    if (!scroller) return;
+    const rect = scroller.getBoundingClientRect();
+    const anchorViewportOffset = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+    const totalWidth = scroller.scrollWidth || rect.width;
+    const anchorRatio = (scroller.scrollLeft + anchorViewportOffset) / totalWidth;
+
+    waveformMovedRef.current = false;
+    setWaveformDrag({
+      startX: e.clientX,
+      startZoom: zoomLevel,
+      anchorRatio,
+      anchorViewportOffset,
+    });
   };
+
+  useEffect(() => {
+    if (!waveformDrag) return;
+
+    const handleMove = (e: MouseEvent) => {
+      const deltaX = e.clientX - waveformDrag.startX;
+      if (Math.abs(deltaX) >= 3) {
+        waveformMovedRef.current = true;
+      }
+      if (!waveformMovedRef.current) return;
+
+      const nextZoom = Math.max(
+        1,
+        Math.min(16, Math.round(waveformDrag.startZoom * Math.pow(2, deltaX / 120) * 100) / 100)
+      );
+      setZoomLevel(nextZoom);
+
+      requestAnimationFrame(() => {
+        const scroller = scrollContainerRef.current;
+        if (!scroller) return;
+        const newTotalWidth = scroller.clientWidth * nextZoom;
+        scroller.scrollLeft = Math.max(
+          0,
+          waveformDrag.anchorRatio * newTotalWidth - waveformDrag.anchorViewportOffset
+        );
+        updateViewportMetrics();
+      });
+    };
+
+    const handleUp = (e: MouseEvent) => {
+      if (!waveformMovedRef.current) {
+        const mapped = clientXToTime(e.clientX);
+        if (mapped) {
+          onSeek(mapped.time);
+          onPause?.();
+        }
+      }
+      setWaveformDrag(null);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, [waveformDrag, clientXToTime, onSeek, onPause, updateViewportMetrics]);
 
   const handlePrevCue = () => {
     const prev = [...subtitles].reverse().find((c) => c.start < currentTime - 0.2);
@@ -605,7 +673,7 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             type="button"
             onClick={() => onAddCueAtTime(currentTime)}
             className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-md bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            title="Añadir subtítulo en el tiempo actual (o doble clic en la pista)"
+            title="Añadir subtítulo en el tiempo actual"
           >
             <Plus className="w-3 h-3" />
             <span className="font-mono tabular-nums">{formatTimeDisplay(currentTime, false)}</span>
@@ -623,7 +691,6 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
         <div
           ref={trackRef}
           onClick={handleTrackClick}
-          onDoubleClick={handleTrackDoubleClick}
           onMouseMove={(e) => {
             const mapped = clientXToTime(e.clientX);
             if (mapped) {
@@ -636,7 +703,9 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             setHoverPct(null);
           }}
           style={{ width: `${zoomLevel * 100}%` }}
-          className="relative h-full flex flex-col cursor-crosshair select-none"
+          className={`relative h-full flex flex-col select-none ${
+            waveformDrag ? 'cursor-grabbing' : 'cursor-pointer'
+          }`}
         >
           {/* TRACK 0: Interactive Time Ruler (Click & Drag Scrubbing) */}
           <div
@@ -665,21 +734,38 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             })}
           </div>
 
-          {/* TRACK 1: Audio Waveform Reference */}
-          <div className="h-10 px-1 flex items-center justify-between gap-[1px] bg-[#08090d] border-b border-neutral-800/60 pointer-events-none opacity-85 shrink-0">
+          {/* TRACK 1: Audio Waveform (Grab with hand cursor & drag right/left to stretch or shrink timeline) */}
+          <div
+            onMouseDown={handleWaveformMouseDown}
+            onClick={(e) => e.stopPropagation()}
+            className={`relative h-10 px-1 flex items-center justify-between gap-[1px] border-b border-neutral-800/60 shrink-0 transition-colors ${
+              waveformDrag
+                ? 'bg-indigo-950/40 cursor-grabbing opacity-100'
+                : 'bg-[#08090d] hover:bg-[#0d1018] cursor-grab opacity-85 hover:opacity-100'
+            }`}
+            title="Arrastra con la manita a la derecha para estirar o a la izquierda para encoger la línea de tiempo"
+          >
             {waveformBars.map((heightPct, idx) => (
               <div
                 key={idx}
                 style={{ height: `${heightPct}%` }}
-                className="flex-1 bg-indigo-500/45 rounded-full"
+                className={`flex-1 rounded-full pointer-events-none ${
+                  waveformDrag ? 'bg-indigo-400/70' : 'bg-indigo-500/45'
+                }`}
               />
             ))}
+
+            {waveformDrag && (
+              <div className="sticky left-2 z-30 ml-2 px-2 py-0.5 rounded bg-neutral-950/90 border border-indigo-400/50 text-indigo-200 font-mono tabular-nums text-[10px] whitespace-nowrap pointer-events-none shadow-lg">
+                Escala: {Number.isInteger(zoomLevel) ? `${zoomLevel}x` : `${zoomLevel.toFixed(1)}x`}
+              </div>
+            )}
           </div>
 
           {/* TRACK 2: Draggable & Resizable Subtitle Cue Blocks */}
           <div
-            className="relative flex-1 min-h-[60px] p-1.5"
-            title="Doble clic aquí para insertar un nuevo bloque en esa posición"
+            className="relative flex-1 min-h-[60px] p-1.5 cursor-pointer"
+            title="Haz clic para seleccionar o mover el cabezal de tiempo"
           >
             {subtitles.map((cue, idx) => {
               const leftPct = Math.min(100, Math.max(0, (cue.start / safeDuration) * 100));
@@ -704,7 +790,7 @@ export const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
                     left: `${leftPct}%`,
                     width: `${widthPct}%`,
                   }}
-                  className={`absolute top-1.5 bottom-1.5 rounded-md border text-[11px] font-medium px-2 flex items-center justify-between overflow-visible cursor-grab active:cursor-grabbing ${
+                  className={`absolute top-1.5 bottom-1.5 rounded-md border text-[11px] font-medium px-2 flex items-center justify-between overflow-visible cursor-pointer active:cursor-grabbing ${
                     isBeingDragged
                       ? 'bg-amber-300 border-white text-neutral-950 font-bold shadow-2xl z-20 ring-2 ring-amber-400'
                       : isInBatch && !isPrimarySelected
