@@ -1,16 +1,13 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Cpu,
   Sparkles,
-  Upload,
   Video,
   Check,
   AlertCircle,
-  Loader2,
   X,
-  Key,
-  ShieldCheck,
   Zap,
+  AudioLines,
 } from 'lucide-react';
 import { SubtitleCue } from '../types/subtitle';
 import { runSafeAITranscription, getSafeVideoDuration } from '../services/aiTranscription';
@@ -34,12 +31,13 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
   onClose,
 }) => {
   const [generationMode, setGenerationMode] = useState<'ai' | 'algorithmic'>('ai');
+  const [autoAlignWithAudio, setAutoAlignWithAudio] = useState<boolean>(true);
   const [customText, setCustomText] = useState<string>('');
   const [groqKey, setGroqKey] = useState<string>(() => localStorage.getItem('subcraft_groq_api_key') || '');
-  const [showKeyInput, setShowKeyInput] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [progressStage, setProgressStage] = useState<string>('');
   const [progressPercent, setProgressPercent] = useState<number>(0);
+  const [alignReportText, setAlignReportText] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -59,8 +57,13 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
   const handleStartGeneration = async () => {
     setIsProcessing(true);
     setErrorMessage(null);
-    setProgressPercent(15);
-    setProgressStage('Analizando archivo de video con memoria optimizada...');
+    setAlignReportText(null);
+    setProgressPercent(10);
+    setProgressStage(
+      generationMode === 'ai' && autoAlignWithAudio && (currentVideoFile || currentVideoUrl)
+        ? 'Paso 1/2 · Preparando audio y motor de IA...'
+        : 'Analizando archivo multimedia con memoria optimizada...'
+    );
 
     try {
       let duration = videoDuration && videoDuration > 0 ? videoDuration : 60;
@@ -70,16 +73,24 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
       }
 
       let generatedCues: SubtitleCue[] = [];
+      let resolvedLanguage = 'es';
+      let completedAlignSummary: string | null = null;
 
       if (generationMode === 'ai') {
-        setProgressStage('Procesando transcripción con Inteligencia Artificial...');
-        setProgressPercent(40);
-
         generatedCues = await runSafeAITranscription({
           videoFile: currentVideoFile,
+          videoUrl: currentVideoUrl,
           videoDuration: duration,
           promptHint: customText,
           groqApiKey: groqKey,
+          autoAlign: autoAlignWithAudio,
+          onLanguageDetected: (langCode) => {
+            if (langCode) resolvedLanguage = langCode;
+          },
+          onAutoAlignComplete: (res) => {
+            completedAlignSummary = `${res.adjustedCount} bloques auto-alineados a ${res.speechSegmentsCount} picos de voz`;
+            setAlignReportText(completedAlignSummary);
+          },
           onProgress: (pct, stage) => {
             setProgressPercent(pct);
             setProgressStage(stage);
@@ -106,15 +117,18 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
         }));
 
       setProgressPercent(100);
-      setProgressStage('¡Subtítulos sincronizados con éxito!');
+      setProgressStage(
+        completedAlignSummary
+          ? '¡Subtítulos generados y auto-alineados con éxito!'
+          : '¡Subtítulos sincronizados con éxito!'
+      );
 
       setTimeout(() => {
-        onSubtitlesGenerated(normalizedCues, 'es');
+        onSubtitlesGenerated(normalizedCues, resolvedLanguage);
         onClose();
-      }, 350);
+      }, 450);
     } catch (err: any) {
       console.error('Error generating subtitles:', err);
-      // Even if AI completely fails, fall back to algorithmic generator to protect user experience
       try {
         const fallbackCues = await generateAlgorithmicSubtitles(30, customText);
         onSubtitlesGenerated(fallbackCues, 'es');
@@ -145,7 +159,7 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                Memoria optimizada · Soporta Groq Whisper y motor algorítmico
+                Transcripción por IA + auto-alineación con picos de onda en un solo paso
               </p>
             </div>
           </div>
@@ -173,7 +187,9 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
                   {progressStage}
                 </h3>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                  Protección de memoria activa · Procesamiento fluido
+                  {alignReportText
+                    ? alignReportText
+                    : 'Protección de memoria activa · Procesamiento fluido'}
                 </p>
               </div>
 
@@ -218,51 +234,100 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
 
               {/* AI Engine & Groq API Key Panel */}
               {generationMode === 'ai' && (
-                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 font-bold text-amber-600 dark:text-amber-400">
-                      <Zap className="w-4 h-4 text-amber-500" />
-                      <span>Motor de IA: Groq Whisper LPU + Gemini 2.5</span>
+                <div className="space-y-3">
+                  <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 font-bold text-amber-600 dark:text-amber-400">
+                        <Zap className="w-4 h-4 text-amber-500" />
+                        <span>Motor de IA: Groq Whisper LPU + Gemini</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold">
+                        {groqKey ? 'Groq Activo' : 'Gemini Activo'}
+                      </span>
                     </div>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold">
-                      {groqKey ? 'Groq Activo' : 'Gemini Activo'}
-                    </span>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300 block mb-1">
+                        API Key de Groq (opcional, para Whisper ultra-rápido):
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="password"
+                          value={groqKey}
+                          onChange={(e) => handleSaveGroqKey(e.target.value)}
+                          placeholder="Pega aquí tu clave gsk_... de Groq"
+                          className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-neutral-900 border border-amber-400/40 dark:border-amber-500/30 text-xs font-mono text-neutral-900 dark:text-neutral-100 outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                        {groqKey && (
+                          <button
+                            type="button"
+                            onClick={() => handleSaveGroqKey('')}
+                            className="px-2 py-1 text-[11px] text-red-500 hover:text-red-700 dark:hover:text-red-400 cursor-pointer font-bold"
+                            title="Eliminar clave"
+                          >
+                            Borrar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {groqKey ? (
+                      <p className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 font-semibold">
+                        <Check className="w-3.5 h-3.5" /> Clave de Groq guardada. Se transcribirán los subtítulos con Whisper.
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
+                        Sin clave de Groq se usa automáticamente el motor Gemini del servidor.
+                      </p>
+                    )}
                   </div>
 
-                  <div>
-                    <label className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300 block mb-1">
-                      API Key de Groq (para Whisper ultra-rápido en todos tus videos):
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        value={groqKey}
-                        onChange={(e) => handleSaveGroqKey(e.target.value)}
-                        placeholder="Pega aquí tu clave gsk_... de Groq"
-                        className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-neutral-900 border border-amber-400/40 dark:border-amber-500/30 text-xs font-mono text-neutral-900 dark:text-neutral-100 outline-none focus:ring-2 focus:ring-amber-500"
-                      />
-                      {groqKey && (
-                        <button
-                          type="button"
-                          onClick={() => handleSaveGroqKey('')}
-                          className="px-2 py-1 text-[11px] text-red-500 hover:text-red-700 dark:hover:text-red-400 cursor-pointer font-bold"
-                          title="Eliminar clave"
-                        >
-                          Borrar
-                        </button>
-                      )}
+                  {/* Unified Auto-Align Option */}
+                  <button
+                    type="button"
+                    onClick={() => setAutoAlignWithAudio((prev) => !prev)}
+                    className={`w-full text-left p-3.5 rounded-2xl border transition-all cursor-pointer flex items-start justify-between gap-3 ${
+                      autoAlignWithAudio
+                        ? 'bg-indigo-500/10 border-indigo-500/40'
+                        : 'bg-neutral-50 dark:bg-neutral-800/40 border-neutral-200 dark:border-neutral-800'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <div
+                        className={`p-2 rounded-xl shrink-0 mt-0.5 ${
+                          autoAlignWithAudio
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-500'
+                        }`}
+                      >
+                        <AudioLines className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-extrabold text-neutral-900 dark:text-neutral-100">
+                            Auto-Alinear con Onda de Audio (IA)
+                          </span>
+                          {autoAlignWithAudio && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-600 dark:text-indigo-300">
+                              En Conjunto
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5 leading-relaxed">
+                          Analiza automáticamente los picos de voz tras transcribir para ajustar inicio y fin exactos.
+                        </p>
+                      </div>
                     </div>
-                  </div>
-
-                  {groqKey ? (
-                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 font-semibold">
-                      <Check className="w-3.5 h-3.5" /> Clave de Groq guardada. Se transcribirán todos los subtítulos del video con Whisper.
-                    </p>
-                  ) : (
-                    <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
-                      💡 Si pegas tu API Key de Groq (<code className="text-amber-500 font-mono">gsk_...</code>), se usará Whisper LPU a máxima velocidad. Si no tienes una, el sistema usará automáticamente el motor Gemini 2.5 del servidor.
-                    </p>
-                  )}
+                    <div
+                      className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mt-1 transition-colors ${
+                        autoAlignWithAudio
+                          ? 'bg-indigo-600 border-indigo-600 text-white'
+                          : 'border-neutral-400 dark:border-neutral-600 bg-transparent'
+                      }`}
+                    >
+                      {autoAlignWithAudio && <Check className="w-3.5 h-3.5" />}
+                    </div>
+                  </button>
                 </div>
               )}
 
@@ -278,7 +343,9 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
                     </span>
                     <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
                       {generationMode === 'ai'
-                        ? 'Listo para transcripción por IA segura'
+                        ? autoAlignWithAudio
+                          ? 'Transcripción + alineación de picos de voz lista'
+                          : 'Listo para transcripción por IA segura'
                         : 'Listo para división rítmica instantánea'}
                     </span>
                   </div>
@@ -327,7 +394,9 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
                 <Sparkles className="w-4 h-4 text-amber-200" />
                 <span>
                   {generationMode === 'ai'
-                    ? 'Generar Subtítulos con IA (Seguro)'
+                    ? autoAlignWithAudio
+                      ? 'Generar y Auto-Alinear Subtítulos con IA'
+                      : 'Generar Subtítulos con IA (Seguro)'
                     : 'Generar Subtítulos Algorítmicos'}
                 </span>
               </button>

@@ -236,24 +236,57 @@ Guidelines:
 
     const promptText = `Please transcribe this audio clip. ${languageInstruction} ${promptHint ? `Context hint: ${promptHint}` : ''}`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [
-        {
-          inlineData: {
-            mimeType,
-            data: cleanBase64,
-          },
-        },
-        {
-          text: promptText,
-        },
-      ],
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: 'application/json',
-      },
-    });
+    const transcribeModels: Array<{ model: string; thinkingLevel?: ThinkingLevel }> = [
+      { model: 'gemini-3.5-transcribe' },
+      { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
+      { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
+    ];
+
+    let response: any = null;
+    let lastTranscribeErr: any = null;
+
+    for (let attempt = 0; attempt < transcribeModels.length; attempt++) {
+      const { model, thinkingLevel } = transcribeModels[attempt];
+      try {
+        const config: Record<string, any> = {
+          systemInstruction: systemPrompt,
+          responseMimeType: 'application/json',
+        };
+        if (thinkingLevel) {
+          config.thinkingConfig = { thinkingLevel };
+        }
+        const generatePromise = ai.models.generateContent({
+          model,
+          contents: [
+            {
+              inlineData: {
+                mimeType,
+                data: cleanBase64,
+              },
+            },
+            {
+              text: promptText,
+            },
+          ],
+          config,
+        });
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`Timeout calling ${model}`)), 25000)
+        );
+        response = await Promise.race([generatePromise, timeoutPromise]);
+        break;
+      } catch (err: any) {
+        lastTranscribeErr = err;
+        if (attempt === transcribeModels.length - 1) {
+          throw err;
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+
+    if (!response) {
+      throw lastTranscribeErr || new Error('No response from transcription model.');
+    }
 
     const outputText = response.text || (response.candidates?.[0]?.content?.parts?.[0] as any)?.text || '{}';
     let parsedData;
@@ -342,10 +375,11 @@ Return strictly valid JSON with the format:
 }`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.1-flash-lite',
       contents: prompt,
       config: {
         systemInstruction: 'You are an expert audiovisual translator specializing in film and video subtitle localization. Retain exact timing and output valid JSON.',
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
         responseMimeType: 'application/json',
       },
     });
@@ -429,10 +463,11 @@ Return strictly valid JSON:
 }`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.1-flash-lite',
       contents: prompt,
       config: {
         systemInstruction: 'You are an expert video editor and copywriter specializing in video captions. Output strictly valid JSON.',
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
         responseMimeType: 'application/json',
       },
     });

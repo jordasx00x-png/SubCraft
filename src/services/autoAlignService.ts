@@ -25,7 +25,7 @@ export interface AutoAlignResult {
 /**
  * Decode audio from File or URL (supporting locally restored blobs and /api/media streams).
  */
-async function decodeMediaAudio(
+export async function decodeMediaAudio(
   videoFile: File | null | undefined,
   videoUrl: string | null | undefined
 ): Promise<AudioBuffer> {
@@ -231,18 +231,32 @@ export async function runAutoAlignSubtitles(options: {
   subtitles: SubtitleCue[];
   videoFile?: File | null;
   videoUrl?: string | null;
+  audioBuffer?: AudioBuffer | null;
   duration: number;
   language?: string;
   onProgress?: (percent: number, stage: string) => void;
 }): Promise<AutoAlignResult> {
-  const { subtitles, videoFile, videoUrl, duration, language = 'es', onProgress } = options;
+  const {
+    subtitles,
+    videoFile,
+    videoUrl,
+    audioBuffer: preDecodedAudioBuffer,
+    duration,
+    language = 'es',
+    onProgress,
+  } = options;
 
   if (!subtitles || subtitles.length === 0) {
     throw new Error('No hay subtítulos en el proyecto para alinear.');
   }
 
-  onProgress?.(20, 'Decodificando pista de audio...');
-  const audioBuffer = await decodeMediaAudio(videoFile, videoUrl);
+  let audioBuffer = preDecodedAudioBuffer || null;
+  if (!audioBuffer) {
+    onProgress?.(20, 'Decodificando pista de audio...');
+    audioBuffer = await decodeMediaAudio(videoFile, videoUrl);
+  } else {
+    onProgress?.(30, 'Reutilizando pista de audio decodificada...');
+  }
 
   onProgress?.(48, 'Analizando picos de onda y segmentos de voz...');
   const analysis = analyzeWaveformPeaks(audioBuffer);

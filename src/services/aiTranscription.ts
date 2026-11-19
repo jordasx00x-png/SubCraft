@@ -1,13 +1,22 @@
 import { SubtitleCue } from '../types/subtitle';
 import { extractAudioFromFile, convertAudioBufferTo16kHzWav } from '../utils/audioExtractor';
 import { generateAlgorithmicSubtitles } from '../utils/nonAiTranscriber';
+import {
+  AutoAlignResult,
+  decodeMediaAudio,
+  runAutoAlignSubtitles,
+} from './autoAlignService';
 
 export interface TranscriptionOptions {
   videoFile: File | null;
+  videoUrl?: string | null;
   videoDuration: number;
   promptHint?: string;
   language?: string;
   groqApiKey?: string;
+  autoAlign?: boolean;
+  onAutoAlignComplete?: (result: AutoAlignResult) => void;
+  onLanguageDetected?: (languageCode: string) => void;
   onProgress?: (percent: number, stage: string) => void;
 }
 
@@ -95,14 +104,50 @@ export async function transcribeWithGroq(
   return [];
 }
 
+function normalizeTranscribedCues(cues: SubtitleCue[]): SubtitleCue[] {
+  return [...cues]
+    .sort((a, b) => a.start - b.start)
+    .map((cue, idx) => {
+      const start = Math.max(0, Math.round(Number(cue.start || 0) * 100) / 100);
+      const rawEnd = Math.round(Number(cue.end || start + 1) * 100) / 100;
+      const end = Math.max(start + 0.3, rawEnd);
+      return {
+        ...cue,
+        id: idx + 1,
+        start,
+        end,
+      };
+    });
+}
+
 /**
- * Orchestrates memory-safe AI transcription with automatic Groq / Gemini / Algorithmic fallback.
+ * Orchestrates memory-safe AI transcription (Groq / Gemini / Algorithmic fallback)
+ * followed automatically by AI waveform peak auto-alignment so generated subtitles
+ * arrive tightly synchronized to real spoken audio.
  */
 export async function runSafeAITranscription(
   options: TranscriptionOptions
 ): Promise<SubtitleCue[]> {
-  const { videoFile, promptHint, language = 'es', onProgress } = options;
+  const {
+    videoFile,
+    videoUrl,
+    promptHint,
+    language = 'es',
+    autoAlign = true,
+    onAutoAlignComplete,
+    onLanguageDetected,
+    onProgress,
+  } = options;
+
   let duration = options.videoDuration || 30;
+  let cachedAudioBuffer: AudioBuffer | null = null;
+  const shouldRunAutoAlign = autoAlign && Boolean(videoFile || videoUrl);
+
+  const reportStage1Progress = (pct: number, stage: string) => {
+    const scaled = shouldRunAutoAlign ? Math.round((pct / 100) * 60) : pct;
+    const label = shouldRunAutoAlign ? `Paso 1/2 · ${stage}` : stage;
+    onProgress?.(scaled, label);
+  };
 
   if (videoFile) {
     try {
@@ -118,17 +163,19 @@ export async function runSafeAITranscription(
   const activeGroqKey =
     options.groqApiKey || localStorage.getItem('subcraft_groq_api_key') || '';
 
+  let rawCues: SubtitleCue[] | null = null;
+  let effectiveLanguage = language;
+
   // 1. Try Groq Whisper directly if API key is configured
   if (activeGroqKey.trim().length > 0 && videoFile) {
-    onProgress?.(30, 'Enviando audio a Groq Whisper LPU...');
+    reportStage1Progress(30, 'Enviando audio a Groq Whisper LPU...');
 
     // If file is already an audio file or small video (< 24MB), stream directly
     if (videoFile.size < 24 * 1024 * 1024) {
       try {
         const groqCues = await transcribeWithGroq(videoFile, activeGroqKey, promptHint);
         if (groqCues.length > 0) {
-          onProgress?.(100, '¡Transcripción con Groq completada con éxito!');
-          return groqCues;
+          rawCues = groqCues;
         }
       } catch (err) {
         console.warn('Groq direct file upload warning, attempting downsampled audio:', err);
@@ -136,36 +183,48 @@ export async function runSafeAITranscription(
     }
 
     // Extract lightweight 16kHz mono WAV slice (< 20MB)
-    try {
-      onProgress?.(45, 'Extrayendo audio comprimido a 16kHz mono...');
-      const audioBuffer = await extractAudioFromFile(videoFile);
-      const { wavBlob } = await convertAudioBufferTo16kHzWav(audioBuffer);
-      onProgress?.(70, 'Transcribiendo con Groq Whisper...');
-      const groqCues = await transcribeWithGroq(wavBlob, activeGroqKey, promptHint);
-      if (groqCues.length > 0) {
-        onProgress?.(100, '¡Transcripción con Groq completada con éxito!');
-        return groqCues;
+    if (!rawCues) {
+      try {
+        reportStage1Progress(45, 'Extrayendo audio comprimido a 16kHz mono...');
+        cachedAudioBuffer = await extractAudioFromFile(videoFile);
+        if (cachedAudioBuffer.duration > 0) {
+          duration = cachedAudioBuffer.duration;
+        }
+        const { wavBlob } = await convertAudioBufferTo16kHzWav(cachedAudioBuffer);
+        reportStage1Progress(75, 'Transcribiendo con Groq Whisper...');
+        const groqCues = await transcribeWithGroq(wavBlob, activeGroqKey, promptHint);
+        if (groqCues.length > 0) {
+          rawCues = groqCues;
+        }
+      } catch (err: any) {
+        console.warn('Groq audio extraction failed, falling back:', err?.message || err);
       }
-    } catch (err: any) {
-      console.warn('Groq audio extraction failed, falling back:', err?.message || err);
     }
   }
 
-  // 2. Try Server-Side Gemini API (using lightweight 16kHz audio, never raw video)
-  if (videoFile) {
+  // 2. Try Server-Side Gemini API (using lightweight 16kHz audio, supporting File or URL)
+  if (!rawCues && (videoFile || videoUrl)) {
     try {
-      onProgress?.(50, 'Conectando con motor de Inteligencia Artificial Gemini...');
-      const audioBuffer = await extractAudioFromFile(videoFile);
-      const { wavBase64 } = await convertAudioBufferTo16kHzWav(audioBuffer);
+      reportStage1Progress(45, 'Extrayendo audio y conectando con Gemini IA...');
+      if (!cachedAudioBuffer) {
+        cachedAudioBuffer = videoFile
+          ? await extractAudioFromFile(videoFile)
+          : await decodeMediaAudio(null, videoUrl);
+      }
+      if (cachedAudioBuffer.duration > 0) {
+        duration = cachedAudioBuffer.duration;
+      }
 
-      onProgress?.(75, 'Generando subtítulos automáticos con Gemini 2.5...');
+      const { wavBase64 } = await convertAudioBufferTo16kHzWav(cachedAudioBuffer);
+
+      reportStage1Progress(80, 'Generando subtítulos automáticos con Gemini IA...');
       const response = await fetch('/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           audioBase64: wavBase64,
           mimeType: 'audio/wav',
-          language,
+          language: effectiveLanguage,
           promptHint,
         }),
       });
@@ -173,9 +232,13 @@ export async function runSafeAITranscription(
       if (response.ok) {
         const resJson = await response.json();
         const subs = resJson.data?.subtitles;
+        const langCode = resJson.data?.languageCode;
+        if (typeof langCode === 'string' && langCode.trim().length > 0) {
+          effectiveLanguage = langCode.trim().toLowerCase();
+          onLanguageDetected?.(effectiveLanguage);
+        }
         if (resJson.success && Array.isArray(subs) && subs.length >= (duration > 30 ? 3 : 1)) {
-          onProgress?.(100, '¡Subtítulos sincronizados con Gemini!');
-          return subs;
+          rawCues = subs;
         }
       }
     } catch (apiErr) {
@@ -183,9 +246,39 @@ export async function runSafeAITranscription(
     }
   }
 
-  // 3. Ultra-fast, 100% memory-safe Algorithmic Fallback
-  onProgress?.(85, 'Sintetizando estructura de subtítulos de alta precisión...');
-  await new Promise((r) => setTimeout(r, 350));
-  onProgress?.(100, '¡Subtítulos listos!');
-  return generateAlgorithmicSubtitles(duration, promptHint);
+  // 3. Fallback when transcription APIs did not produce cues
+  if (!rawCues || rawCues.length === 0) {
+    reportStage1Progress(90, 'Sintetizando estructura base de subtítulos...');
+    await new Promise((r) => setTimeout(r, 250));
+    rawCues = await generateAlgorithmicSubtitles(duration, promptHint);
+  }
+
+  const normalizedCues = normalizeTranscribedCues(rawCues);
+
+  // 4. Unified Step 2: Automatically align generated subtitles to audio waveform peaks
+  if (shouldRunAutoAlign && normalizedCues.length > 0) {
+    try {
+      onProgress?.(64, 'Paso 2/2 · Analizando picos de onda y auto-alineando con IA...');
+      const alignResult = await runAutoAlignSubtitles({
+        subtitles: normalizedCues,
+        videoFile,
+        videoUrl,
+        audioBuffer: cachedAudioBuffer,
+        duration,
+        language: effectiveLanguage,
+        onProgress: (pct, stage) => {
+          const mapped = Math.min(99, 64 + Math.round((pct / 100) * 35));
+          onProgress?.(mapped, `Paso 2/2 · ${stage}`);
+        },
+      });
+      onAutoAlignComplete?.(alignResult);
+      onProgress?.(100, '¡Subtítulos generados y auto-alineados con éxito!');
+      return alignResult.alignedSubtitles;
+    } catch (alignErr) {
+      console.warn('Automatic post-generation alignment skipped due to error:', alignErr);
+    }
+  }
+
+  onProgress?.(100, '¡Subtítulos generados con éxito!');
+  return normalizedCues;
 }
