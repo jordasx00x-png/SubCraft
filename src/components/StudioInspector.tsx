@@ -38,6 +38,8 @@ import {
   Undo2,
   CheckSquare,
   Square,
+  Activity,
+  VolumeX,
 } from 'lucide-react';
 import {
   SubtitleCue,
@@ -48,6 +50,13 @@ import {
 } from '../types/subtitle';
 import { formatTimeDisplay } from '../utils/subtitleFormats';
 import { runAutoAlignSubtitles } from '../services/autoAlignService';
+import {
+  analyzeVideoWithWebAudioVad,
+  applyVadSuggestionsToCues,
+  computeSubtitleOffsetSuggestions,
+  SubtitleOffsetSuggestion,
+  VadAnalysisResult,
+} from '../utils/vadAnalyzer';
 
 export type StudioTab = 'subtitles' | 'style' | 'loops' | 'tools';
 
@@ -274,6 +283,117 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
     setPreviousCuesBackup(null);
     setAlignReport(null);
     setSuccessMsg('Se restauraron los tiempos originales anteriores al alineado.');
+    setTimeout(() => setSuccessMsg(null), 3000);
+  };
+
+  // Web Audio API VAD (Voice Activity Detection) state & handlers
+  const [isAnalyzingVad, setIsAnalyzingVad] = useState(false);
+  const [vadProgress, setVadProgress] = useState(0);
+  const [vadStage, setVadStage] = useState('');
+  const [vadError, setVadError] = useState<string | null>(null);
+  const [vadSensitivity, setVadSensitivity] = useState<'balanced' | 'strict' | 'sensitive'>('balanced');
+  const [vadResult, setVadResult] = useState<VadAnalysisResult | null>(null);
+  const [previousVadBackup, setPreviousVadBackup] = useState<SubtitleCue[] | null>(null);
+
+  React.useEffect(() => {
+    setVadResult(null);
+    setVadError(null);
+  }, [videoFile, videoUrl]);
+
+  const vadComputedSuggestions = useMemo(() => {
+    if (!vadResult) {
+      return { suggestions: [] as SubtitleOffsetSuggestion[], recommendedGlobalOffsetSeconds: null as number | null };
+    }
+    return computeSubtitleOffsetSuggestions(
+      subtitles,
+      vadResult.silenceSegments,
+      vadResult.voiceSegments,
+      vadResult.duration || duration
+    );
+  }, [vadResult, subtitles, duration]);
+
+  const handleRunVadAnalysis = async () => {
+    if (isAnalyzingVad) return;
+    setIsAnalyzingVad(true);
+    setVadError(null);
+    setVadProgress(8);
+    setVadStage('Iniciando análisis VAD en el navegador...');
+
+    try {
+      const result = await analyzeVideoWithWebAudioVad({
+        videoFile,
+        videoUrl,
+        subtitles,
+        minSilenceDurationSec: 1.0,
+        sensitivity: vadSensitivity,
+        onProgress: (pct, stage) => {
+          setVadProgress(pct);
+          setVadStage(stage);
+        },
+      });
+      setVadResult(result);
+      setSuccessMsg(
+        `VAD completado: ${result.silenceSegments.length} silencios > 1s detectados (${result.suggestions.length} ajustes sugeridos)`
+      );
+      setTimeout(() => setSuccessMsg(null), 4000);
+    } catch (err: any) {
+      setVadError(err?.message || 'No se pudo analizar la pista de audio con Web Audio API.');
+    } finally {
+      setIsAnalyzingVad(false);
+    }
+  };
+
+  const handleApplySingleVadSuggestion = (sug: SubtitleOffsetSuggestion) => {
+    const snapshot = subtitles.map((c) => ({ ...c }));
+    const maxDur = vadResult?.duration || duration || 3600;
+    const updated = applyVadSuggestionsToCues(subtitles, [sug], maxDur);
+    setPreviousVadBackup(snapshot);
+    onApplyTimeShift(updated);
+    onSelectCue?.(sug.cueId);
+    onSeek(sug.suggestedStart);
+    setSuccessMsg(`Ajuste aplicado al subtítulo #${sug.cueIndex} (${sug.offsetSeconds >= 0 ? '+' : ''}${sug.offsetSeconds.toFixed(2)}s)`);
+    setTimeout(() => setSuccessMsg(null), 3000);
+  };
+
+  const handleApplyAllVadSuggestions = () => {
+    if (vadComputedSuggestions.suggestions.length === 0) return;
+    const snapshot = subtitles.map((c) => ({ ...c }));
+    const maxDur = vadResult?.duration || duration || 3600;
+    const updated = applyVadSuggestionsToCues(
+      subtitles,
+      vadComputedSuggestions.suggestions,
+      maxDur
+    );
+    setPreviousVadBackup(snapshot);
+    onApplyTimeShift(updated);
+    setSuccessMsg(
+      `Se aplicaron ${vadComputedSuggestions.suggestions.length} sugerencias de tiempo basadas en VAD.`
+    );
+    setTimeout(() => setSuccessMsg(null), 3500);
+  };
+
+  const handleApplyGlobalVadOffset = (offsetSeconds: number) => {
+    if (!Number.isFinite(offsetSeconds) || subtitles.length === 0) return;
+    const snapshot = subtitles.map((c) => ({ ...c }));
+    const maxDur = vadResult?.duration || duration || 3600;
+    const shifted = subtitles.map((cue) => {
+      const start = Math.max(0, Math.min(maxDur - 0.35, Math.round((cue.start + offsetSeconds) * 100) / 100));
+      const end = Math.max(start + 0.35, Math.min(maxDur, Math.round((cue.end + offsetSeconds) * 100) / 100));
+      return { ...cue, start, end };
+    });
+    setPreviousVadBackup(snapshot);
+    onApplyTimeShift(shifted);
+    setSuccessMsg(
+      `Desplazamiento global de ${offsetSeconds >= 0 ? '+' : ''}${offsetSeconds.toFixed(2)}s aplicado a todos los subtítulos.`
+    );
+    setTimeout(() => setSuccessMsg(null), 3500);
+  };
+
+  const handleUndoVadOffsets = () => {
+    if (!previousVadBackup) return;
+    onApplyTimeShift(previousVadBackup);
+    setPreviousVadBackup(null);
+    setSuccessMsg('Se restauraron los tiempos anteriores al ajuste VAD.');
     setTimeout(() => setSuccessMsg(null), 3000);
   };
 
@@ -1871,6 +1991,267 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
                 </>
               )}
             </button>
+          </div>
+
+          {/* Frontend Web Audio API VAD (Silence > 1s Detector & Offset Suggestions) */}
+          <div className="space-y-3 p-4 rounded-2xl border border-cyan-200 dark:border-cyan-900/60 bg-cyan-50/40 dark:bg-[#0f1722]">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h4 className="font-extrabold text-xs text-neutral-900 dark:text-neutral-100 flex items-center gap-2 uppercase tracking-wider">
+                  <Activity className="w-4 h-4 text-cyan-500" />
+                  <span>Detector de Silencios (VAD · Web Audio)</span>
+                </h4>
+                <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1 leading-relaxed">
+                  Analiza la onda de audio en tu navegador para detectar silencios &gt; 1s y sugerir desplazamientos de tiempo exactos.
+                </p>
+              </div>
+              {previousVadBackup && !isAnalyzingVad && (
+                <button
+                  type="button"
+                  onClick={handleUndoVadOffsets}
+                  className="px-2 py-1 rounded-lg text-[11px] font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200/70 dark:hover:bg-neutral-800 flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
+                  title="Deshacer ajustes aplicados desde VAD"
+                >
+                  <Undo2 className="w-3 h-3" />
+                  <span>Deshacer</span>
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] font-semibold text-neutral-600 dark:text-neutral-400 shrink-0">
+                Sensibilidad:
+              </label>
+              <select
+                value={vadSensitivity}
+                onChange={(e) => setVadSensitivity(e.target.value as 'balanced' | 'strict' | 'sensitive')}
+                disabled={isAnalyzingVad}
+                className="flex-1 text-[11px] px-2.5 py-1.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 outline-none font-semibold"
+              >
+                <option value="balanced">Equilibrada (Estándar)</option>
+                <option value="strict">Estricta (Ignorar ruido de fondo)</option>
+                <option value="sensitive">Sensible (Voces suaves)</option>
+              </select>
+            </div>
+
+            {isAnalyzingVad && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] text-cyan-600 dark:text-cyan-400 font-medium">
+                  <span className="truncate pr-2">{vadStage}</span>
+                  <span className="font-mono shrink-0">{vadProgress}%</span>
+                </div>
+                <div className="w-full h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
+                  <div
+                    className="h-full bg-cyan-500 transition-all duration-200"
+                    style={{ width: `${vadProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {vadError && (
+              <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-[11px] text-red-600 dark:text-red-400 flex items-start gap-2">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>{vadError}</span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleRunVadAnalysis}
+              disabled={isAnalyzingVad || (!videoFile && !videoUrl)}
+              className="w-full py-2.5 px-3.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 disabled:opacity-45 text-white text-xs font-bold transition-all shadow-xs active:scale-98 cursor-pointer flex items-center justify-center gap-2"
+            >
+              {isAnalyzingVad ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Analizando onda con Web Audio...</span>
+                </>
+              ) : (
+                <>
+                  <VolumeX className="w-3.5 h-3.5" />
+                  <span>Detectar Silencios (&gt; 1s) y Sugerir Ajustes</span>
+                </>
+              )}
+            </button>
+
+            {vadResult && !isAnalyzingVad && (
+              <div className="space-y-3 pt-1">
+                {/* Interactive VAD Envelope Strip */}
+                <div className="p-2.5 rounded-xl bg-white/80 dark:bg-neutral-900/90 border border-neutral-200 dark:border-neutral-800 space-y-2">
+                  <div className="flex items-center justify-between text-[10px] text-neutral-500 dark:text-neutral-400 font-mono">
+                    <span>
+                      {vadResult.silenceSegments.length} silencios &gt; 1s ({vadResult.totalSilenceDuration}s)
+                    </span>
+                    <span>Piso ruido: {vadResult.noiseFloorDb} dBFS</span>
+                  </div>
+
+                  <div
+                    className="relative h-10 w-full flex items-end gap-[1px] rounded-lg overflow-hidden bg-neutral-100 dark:bg-neutral-950 px-1 py-1 cursor-pointer"
+                    title="Haz clic en la onda para saltar a ese instante"
+                  >
+                    {vadResult.waveformPreview.map((val, idx) => {
+                      const barTime =
+                        ((idx + 0.5) / Math.max(1, vadResult.waveformPreview.length)) *
+                        vadResult.duration;
+                      const isSilent = vadResult.silenceSegments.some(
+                        (s) => barTime >= s.start && barTime <= s.end
+                      );
+                      return (
+                        <div
+                          key={idx}
+                          onClick={() => onSeek(Math.round(barTime * 100) / 100)}
+                          className={`flex-1 rounded-t-xs transition-opacity hover:opacity-80 ${
+                            isSilent
+                              ? 'bg-rose-500/45 dark:bg-rose-500/50'
+                              : 'bg-cyan-500 dark:bg-cyan-400'
+                          }`}
+                          style={{ height: `${Math.max(10, Math.min(100, val))}%` }}
+                          title={`${formatTimeDisplay(barTime)} · ${isSilent ? 'Silencio >1s' : 'Voz activa'}`}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Detected Silence Intervals > 1s */}
+                {vadResult.silenceSegments.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400 block">
+                      Segmentos de silencio detectados (&gt; 1s)
+                    </span>
+                    <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                      {vadResult.silenceSegments.map((sil) => (
+                        <div
+                          key={sil.id}
+                          className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-white/70 dark:bg-neutral-900/70 border border-neutral-200/80 dark:border-neutral-800 text-[11px]"
+                        >
+                          <div className="flex items-center gap-2 font-mono text-neutral-700 dark:text-neutral-300">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                            <span>
+                              {formatTimeDisplay(sil.start)} – {formatTimeDisplay(sil.end)}
+                            </span>
+                            <span className="text-[10px] text-rose-600 dark:text-rose-400 font-bold">
+                              ({sil.duration.toFixed(1)}s)
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => onSeek(sil.start)}
+                            className="text-[10px] font-bold text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer"
+                          >
+                            Ir
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                    No se detectaron silencios mayores a 1 segundo en esta pista.
+                  </p>
+                )}
+
+                {/* Global Offset Suggestion Banner */}
+                {vadComputedSuggestions.recommendedGlobalOffsetSeconds !== null && (
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2">
+                    <div className="text-[11px]">
+                      <p className="font-bold text-amber-700 dark:text-amber-300">
+                        Desfase sistemático detectado:{' '}
+                        <span className="font-mono">
+                          {vadComputedSuggestions.recommendedGlobalOffsetSeconds >= 0 ? '+' : ''}
+                          {vadComputedSuggestions.recommendedGlobalOffsetSeconds.toFixed(2)}s
+                        </span>
+                      </p>
+                      <p className="text-[10px] text-neutral-600 dark:text-neutral-400">
+                        Mueve todos los subtítulos juntos para alinearlos al inicio de voz.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleApplyGlobalVadOffset(
+                          vadComputedSuggestions.recommendedGlobalOffsetSeconds as number
+                        )
+                      }
+                      className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-neutral-950 font-extrabold text-[10px] shrink-0 cursor-pointer"
+                    >
+                      Aplicar Global
+                    </button>
+                  </div>
+                )}
+
+                {/* Per-Cue Offset Suggestions */}
+                {vadComputedSuggestions.suggestions.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-700 dark:text-cyan-300">
+                        {vadComputedSuggestions.suggestions.length} sugerencias de tiempo
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleApplyAllVadSuggestions}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold cursor-pointer"
+                      >
+                        Aplicar Todas ({vadComputedSuggestions.suggestions.length})
+                      </button>
+                    </div>
+
+                    <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                      {vadComputedSuggestions.suggestions.map((sug) => (
+                        <div
+                          key={sug.id}
+                          className="p-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-1.5"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onSelectCue?.(sug.cueId);
+                                onSeek(sug.currentStart);
+                              }}
+                              className="text-left min-w-0 flex-1 cursor-pointer group"
+                            >
+                              <span className="text-[11px] font-bold text-neutral-900 dark:text-neutral-100 block truncate group-hover:text-cyan-500">
+                                #{sug.cueIndex} · {sug.cueText}
+                              </span>
+                            </button>
+                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 shrink-0">
+                              {sug.offsetSeconds >= 0 ? '+' : ''}
+                              {sug.offsetSeconds.toFixed(2)}s
+                            </span>
+                          </div>
+
+                          <p className="text-[10px] text-neutral-500 dark:text-neutral-400 leading-snug">
+                            {sug.reason}
+                          </p>
+
+                          <div className="flex items-center justify-between gap-2 pt-0.5">
+                            <span className="text-[10px] font-mono text-neutral-500">
+                              {sug.currentStart.toFixed(2)}s→{sug.currentEnd.toFixed(2)}s{' '}
+                              <strong className="text-emerald-600 dark:text-emerald-400">
+                                ⇒ {sug.suggestedStart.toFixed(2)}s→{sug.suggestedEnd.toFixed(2)}s
+                              </strong>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleApplySingleVadSuggestion(sug)}
+                              className="px-2 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white text-[10px] font-bold cursor-pointer shrink-0"
+                            >
+                              Aplicar
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                    ✓ Todos los subtítulos actuales ya evitan los silencios &gt; 1s detectados.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Time Shift Sincronizador */}
