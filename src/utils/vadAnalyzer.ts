@@ -36,6 +36,11 @@ export interface SubtitleOffsetSuggestion {
   kind: VadSuggestionKind;
 }
 
+export interface VadEnvelopePoint {
+  t: number;
+  rms: number;
+}
+
 export interface VadAnalysisResult {
   duration: number;
   sampleRate: number;
@@ -43,6 +48,7 @@ export interface VadAnalysisResult {
   thresholdNorm: number;
   minSilenceDuration: number;
   waveformPreview: number[];
+  waveformEnvelope: VadEnvelopePoint[];
   silenceSegments: VadSilenceSegment[];
   voiceSegments: VadVoiceSegment[];
   totalSilenceDuration: number;
@@ -142,12 +148,12 @@ async function isolateSpeechBand(audioBuffer: AudioBuffer): Promise<AudioBuffer>
 
     const highpass = offlineCtx.createBiquadFilter();
     highpass.type = 'highpass';
-    highpass.frequency.value = 130;
+    highpass.frequency.value = 220;
     highpass.Q.value = 0.707;
 
     const lowpass = offlineCtx.createBiquadFilter();
     lowpass.type = 'lowpass';
-    lowpass.frequency.value = 4000;
+    lowpass.frequency.value = 3400;
     lowpass.Q.value = 0.707;
 
     source.connect(highpass);
@@ -170,12 +176,17 @@ export function computeSubtitleOffsetSuggestions(
   subtitles: SubtitleCue[],
   silenceSegments: VadSilenceSegment[],
   voiceSegments: VadVoiceSegment[],
-  duration: number
+  duration: number,
+  waveformEnvelope: VadEnvelopePoint[] = []
 ): {
   suggestions: SubtitleOffsetSuggestion[];
   recommendedGlobalOffsetSeconds: number | null;
 } {
-  if (!subtitles || subtitles.length === 0 || silenceSegments.length === 0) {
+  if (
+    !subtitles ||
+    subtitles.length === 0 ||
+    (silenceSegments.length === 0 && waveformEnvelope.length === 0)
+  ) {
     return { suggestions: [], recommendedGlobalOffsetSeconds: null };
   }
 
@@ -333,6 +344,74 @@ export function computeSubtitleOffsetSuggestions(
             2
           )}s durante un silencio posterior; recortar fin a ${trimmedEnd.toFixed(2)}s.`,
         });
+        continue;
+      }
+    }
+
+    // 4. Oversized cue with low-energy instrumental/non-vocal intro (e.g. 0s -> 16.5s for 7 words)
+    const wordsCount = (cue.text || '').trim().split(/\s+/).filter(Boolean).length;
+    const expectedMaxSpeechDur = Math.max(4.0, wordsCount * 0.85);
+    if (waveformEnvelope.length > 0 && cueDur > expectedMaxSpeechDur + 1.5) {
+      const cueEnv = waveformEnvelope.filter((p) => p.t >= cueStart && p.t <= cueEnd);
+      if (cueEnv.length >= 8) {
+        const leadCutoff = cueStart + Math.min(3.0, cueDur * 0.3);
+        const leadSlice = cueEnv.filter((p) => p.t <= leadCutoff);
+        const leadAvg =
+          leadSlice.reduce((acc, p) => acc + p.rms, 0) / Math.max(1, leadSlice.length);
+
+        const stepSec = Math.max(0.1, (cueEnv[1]?.t || 0.2) - (cueEnv[0]?.t || 0));
+        const winLen = Math.min(cueEnv.length, Math.max(3, Math.round(1.0 / stepSec)));
+        let maxWinAvg = 0;
+        for (let k = 0; k <= cueEnv.length - winLen; k++) {
+          let sum = 0;
+          for (let j = 0; j < winLen; j++) sum += cueEnv[k + j].rms;
+          const avg = sum / winLen;
+          if (avg > maxWinAvg) maxWinAvg = avg;
+        }
+
+        if (maxWinAvg >= Math.max(20, leadAvg * 1.45)) {
+          const onsetThreshold = Math.max(leadAvg * 1.4, maxWinAvg * 0.46);
+          const minKeepTail = Math.max(
+            1.2,
+            Math.min(expectedMaxSpeechDur * 0.7, wordsCount * 0.35)
+          );
+          const latestAllowedStart = Math.max(cueStart, cueEnd - minKeepTail);
+
+          for (let k = 0; k < cueEnv.length - 1; k++) {
+            if (cueEnv[k].t > latestAllowedStart) break;
+            if (
+              cueEnv[k].rms >= onsetThreshold &&
+              cueEnv[k + 1].rms >= onsetThreshold * 0.85
+            ) {
+              const targetStart = round2(Math.max(prevEndBound, cueEnv[k].t - 0.1));
+              const delta = round2(targetStart - cueStart);
+              if (delta >= 0.8 && targetStart < cueEnd - 0.45) {
+                suggestions.push({
+                  id: `vad-sug-${cue.id}-intro`,
+                  cueId: cue.id,
+                  cueIndex: i + 1,
+                  cueText: cue.text,
+                  currentStart: round2(cueStart),
+                  currentEnd: round2(cueEnd),
+                  suggestedStart: targetStart,
+                  suggestedEnd: round2(cueEnd),
+                  offsetSeconds: delta,
+                  silenceSegment: {
+                    id: `intro-${cue.id}`,
+                    start: round2(cueStart),
+                    end: targetStart,
+                    duration: delta,
+                    avgEnergyDb: -35,
+                  },
+                  kind: 'trim-leading-silence',
+                  reason: `Intro sin voz (${cueDur.toFixed(1)}s para ${wordsCount} palabras); la voz entra cerca de ${targetStart.toFixed(2)}s.`,
+                });
+                directionalOffsets.push(delta);
+              }
+              break;
+            }
+          }
+        }
       }
     }
   }
@@ -462,9 +541,9 @@ export async function analyzeVideoWithWebAudioVad(
   const dynamicSpan = Math.max(0, speechCeilingNorm - noiseFloorNorm);
 
   const sensitivityMultiplier =
-    sensitivity === 'strict' ? 0.24 : sensitivity === 'sensitive' ? 0.12 : 0.18;
+    sensitivity === 'strict' ? 0.28 : sensitivity === 'sensitive' ? 0.14 : 0.22;
   const thresholdNorm = round2(
-    Math.max(5.5, Math.min(28, noiseFloorNorm + Math.max(4, dynamicSpan * sensitivityMultiplier)))
+    Math.max(5.5, Math.min(42, noiseFloorNorm + Math.max(4.5, dynamicSpan * sensitivityMultiplier)))
   );
 
   // Digital silence check
@@ -582,12 +661,29 @@ export async function analyzeVideoWithWebAudioVad(
     waveformPreview.push(Math.round(maxInBar));
   }
 
+  // Build ~0.20s resolution RMS envelope for cue-level onset diagnostics
+  const waveformEnvelope: VadEnvelopePoint[] = [];
+  const envStride = Math.max(1, Math.round(0.2 / frameDuration));
+  for (let i = 0; i < normFrames.length; i += envStride) {
+    let sum = 0;
+    let count = 0;
+    for (let j = i; j < Math.min(normFrames.length, i + envStride); j++) {
+      sum += normFrames[j];
+      count++;
+    }
+    waveformEnvelope.push({
+      t: round2(i * frameDuration),
+      rms: Math.round((sum / Math.max(1, count)) * 10) / 10,
+    });
+  }
+
   onProgress?.(90, 'Calculando sugerencias de desplazamiento de subtítulos...');
   const { suggestions, recommendedGlobalOffsetSeconds } = computeSubtitleOffsetSuggestions(
     subtitles,
     silenceSegments,
     voiceSegments,
-    duration
+    duration,
+    waveformEnvelope
   );
 
   const totalSilenceDuration = round2(
@@ -603,6 +699,7 @@ export async function analyzeVideoWithWebAudioVad(
     thresholdNorm,
     minSilenceDuration: minSilenceDurationSec,
     waveformPreview,
+    waveformEnvelope,
     silenceSegments,
     voiceSegments,
     totalSilenceDuration,

@@ -48,28 +48,40 @@ export function getSafeVideoDuration(file: File): Promise<number> {
 export async function transcribeWithGroq(
   audioBlobOrFile: Blob | File,
   apiKey: string,
-  promptHint?: string
+  promptHint?: string,
+  onLanguageDetected?: (languageCode: string) => void
 ): Promise<SubtitleCue[]> {
   const fileName =
     audioBlobOrFile instanceof File
       ? audioBlobOrFile.name
       : 'audio.wav';
-  const formData = new FormData();
-  formData.append('file', audioBlobOrFile, fileName);
-  formData.append('model', 'whisper-large-v3-turbo');
-  formData.append('response_format', 'verbose_json');
-  formData.append('timestamp_granularities[]', 'segment');
-  if (promptHint && promptHint.trim().length > 0) {
-    formData.append('prompt', promptHint.slice(0, 400));
-  }
 
-  const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey.trim()}`,
-    },
-    body: formData,
-  });
+  const runGroqRequest = async (includeWords: boolean) => {
+    const formData = new FormData();
+    formData.append('file', audioBlobOrFile, fileName);
+    formData.append('model', 'whisper-large-v3-turbo');
+    formData.append('response_format', 'verbose_json');
+    formData.append('timestamp_granularities[]', 'segment');
+    if (includeWords) {
+      formData.append('timestamp_granularities[]', 'word');
+    }
+    if (promptHint && promptHint.trim().length > 0) {
+      formData.append('prompt', promptHint.slice(0, 400));
+    }
+
+    return fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey.trim()}`,
+      },
+      body: formData,
+    });
+  };
+
+  let response = await runGroqRequest(true);
+  if (!response.ok && response.status === 400) {
+    response = await runGroqRequest(false);
+  }
 
   if (!response.ok) {
     const errText = await response.text();
@@ -84,16 +96,66 @@ export async function transcribeWithGroq(
   }
 
   const result = await response.json();
+  if (typeof result.language === 'string' && result.language.trim()) {
+    onLanguageDetected?.(result.language.trim().toLowerCase());
+  }
+
   const segments = result.segments;
+  const words: Array<{ word?: string; start?: number; end?: number }> = Array.isArray(result.words)
+    ? result.words
+    : [];
 
   if (Array.isArray(segments) && segments.length > 0) {
-    return segments.map((seg: any, idx: number) => ({
-      id: idx + 1,
-      start: Math.round(Number(seg.start) * 100) / 100,
-      end: Math.round(Number(seg.end) * 100) / 100,
-      text: (seg.text || '').trim(),
-      speaker: 'Locutor',
-    }));
+    let wordCursor = 0;
+
+    return segments.map((seg: any, idx: number) => {
+      const segStart = Number(seg.start || 0);
+      const segEnd = Number(seg.end || segStart + 1);
+      let start = segStart;
+      let end = segEnd;
+
+      if (words.length > 0) {
+        while (
+          wordCursor < words.length &&
+          Number(words[wordCursor]?.end ?? 0) < segStart - 0.1
+        ) {
+          wordCursor++;
+        }
+
+        const segWords: Array<{ start: number; end: number }> = [];
+        let scan = wordCursor;
+        while (scan < words.length) {
+          const wStart = Number(words[scan]?.start ?? NaN);
+          const wEnd = Number(words[scan]?.end ?? NaN);
+          if (!Number.isFinite(wStart) || !Number.isFinite(wEnd)) {
+            scan++;
+            continue;
+          }
+          if (wStart > segEnd + 0.15) break;
+          if (wEnd >= segStart - 0.1) {
+            segWords.push({ start: wStart, end: wEnd });
+          }
+          scan++;
+        }
+
+        if (segWords.length > 0) {
+          wordCursor = scan;
+          start = Math.max(segStart, segWords[0].start - 0.06);
+          end = Math.min(
+            segEnd + 0.1,
+            Math.max(start + 0.35, segWords[segWords.length - 1].end + 0.14)
+          );
+        }
+      }
+
+      return {
+        id: idx + 1,
+        start: Math.round(start * 100) / 100,
+        end: Math.round(end * 100) / 100,
+        text: (seg.text || '').trim(),
+        speaker: 'Locutor',
+      };
+    });
   }
 
   // If segments array is missing but single text is present
@@ -173,7 +235,10 @@ export async function runSafeAITranscription(
     // If file is already an audio file or small video (< 24MB), stream directly
     if (videoFile.size < 24 * 1024 * 1024) {
       try {
-        const groqCues = await transcribeWithGroq(videoFile, activeGroqKey, promptHint);
+        const groqCues = await transcribeWithGroq(videoFile, activeGroqKey, promptHint, (lang) => {
+          effectiveLanguage = lang;
+          onLanguageDetected?.(lang);
+        });
         if (groqCues.length > 0) {
           rawCues = groqCues;
         }
@@ -192,7 +257,10 @@ export async function runSafeAITranscription(
         }
         const { wavBlob } = await convertAudioBufferTo16kHzWav(cachedAudioBuffer);
         reportStage1Progress(75, 'Transcribiendo con Groq Whisper...');
-        const groqCues = await transcribeWithGroq(wavBlob, activeGroqKey, promptHint);
+        const groqCues = await transcribeWithGroq(wavBlob, activeGroqKey, promptHint, (lang) => {
+          effectiveLanguage = lang;
+          onLanguageDetected?.(lang);
+        });
         if (groqCues.length > 0) {
           rawCues = groqCues;
         }

@@ -308,7 +308,8 @@ export const StudioInspector: React.FC<StudioInspectorProps> = ({
       subtitles,
       vadResult.silenceSegments,
       vadResult.voiceSegments,
-      vadResult.duration || duration
+      vadResult.duration || duration,
+      vadResult.waveformEnvelope
     );
   }, [vadResult, subtitles, duration]);
 

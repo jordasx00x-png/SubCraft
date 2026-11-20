@@ -143,11 +143,11 @@ export function analyzeWaveformPeaks(audioBuffer: AudioBuffer): {
     return { duration, waveformPeaks, speechSegments: [], silenceRegions };
   }
 
-  // Adaptive threshold between quiet room-tone (12th pct) and typical active speech (90th pct)
+  // Adaptive threshold between quiet room-tone / soft intro (12th pct) and active voice (90th pct)
   const noiseFloorNorm = Math.min(100, (sortedRms[Math.floor(sortedRms.length * 0.12)] || 0) / scaleRms * 100);
   const speechCeilingNorm = Math.min(100, (sortedRms[Math.floor(sortedRms.length * 0.90)] || 0) / scaleRms * 100);
   const dynamicSpan = Math.max(0, speechCeilingNorm - noiseFloorNorm);
-  const activeThreshold = Math.max(6, Math.min(24, noiseFloorNorm + Math.max(4.5, dynamicSpan * 0.18)));
+  const activeThreshold = Math.max(6, Math.min(42, noiseFloorNorm + Math.max(4.5, dynamicSpan * 0.22)));
 
   // Initial voice activity detection
   const rawActive: boolean[] = waveformPeaks.map(
@@ -247,8 +247,58 @@ export function analyzeWaveformPeaks(audioBuffer: AudioBuffer): {
 }
 
 /**
+ * Isolate human vocal frequencies (220 Hz - 3.4 kHz) using OfflineAudioContext BiquadFilters
+ * so low piano pads, basslines, and drums don't mask the exact entry of speech or singing.
+ */
+async function conditionVocalBuffer(audioBuffer: AudioBuffer): Promise<AudioBuffer> {
+  if (audioBuffer.duration > 1200) return audioBuffer;
+  const OfflineCtxClass =
+    window.OfflineAudioContext || (window as any).webkitOfflineAudioContext;
+  if (!OfflineCtxClass) return audioBuffer;
+
+  try {
+    const targetRate = Math.min(16000, audioBuffer.sampleRate || 16000);
+    const frameLength = Math.max(1, Math.ceil(audioBuffer.duration * targetRate));
+    const offlineCtx = new OfflineCtxClass(1, frameLength, targetRate);
+
+    const monoSrc = offlineCtx.createBuffer(1, audioBuffer.length, audioBuffer.sampleRate);
+    const out = monoSrc.getChannelData(0);
+    const ch0 = audioBuffer.getChannelData(0);
+    const ch1 = audioBuffer.numberOfChannels > 1 ? audioBuffer.getChannelData(1) : null;
+    if (ch1) {
+      for (let i = 0; i < audioBuffer.length; i++) out[i] = (ch0[i] + ch1[i]) * 0.5;
+    } else {
+      out.set(ch0);
+    }
+
+    const src = offlineCtx.createBufferSource();
+    src.buffer = monoSrc;
+
+    const hp = offlineCtx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 220;
+    hp.Q.value = 0.707;
+
+    const lp = offlineCtx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 3400;
+    lp.Q.value = 0.707;
+
+    src.connect(hp);
+    hp.connect(lp);
+    lp.connect(offlineCtx.destination);
+    src.start(0);
+
+    return await offlineCtx.startRendering();
+  } catch {
+    return audioBuffer;
+  }
+}
+
+/**
  * Enforce strict chronological monotonicity and ground each cue against real speech onsets:
  * - Trims leading silence (>0.25s) so subtitles wait until the voice actually starts.
+ * - Trims instrumental/low-energy intros inside oversized cues (e.g. 7 words spanning 16s from t=0).
  * - Shifts cues stranded entirely in silent gaps onto the matching speech onset when safe.
  * - Trims excessive trailing silence (>0.45s) hanging after speech ends.
  */
@@ -257,7 +307,8 @@ function normalizeAlignedCues(
   alignedMap: Map<string, { start: number; end: number }>,
   maxDuration: number,
   speechSegments: SpeechSegment[] = [],
-  silenceRegions: SilenceRegion[] = []
+  silenceRegions: SilenceRegion[] = [],
+  waveformPeaks: WaveformBucket[] = []
 ): SubtitleCue[] {
   const result: SubtitleCue[] = [];
   let prevEnd = 0;
@@ -270,6 +321,9 @@ function normalizeAlignedCues(
     let end = aligned && Number.isFinite(aligned.end) ? aligned.end : orig.end;
 
     const origDur = Math.max(0.45, (orig.end || 0) - (orig.start || 0));
+    const wordsCount = (orig.text || '').trim().split(/\s+/).filter(Boolean).length;
+    const expectedMaxSpeechDur = Math.max(4.0, wordsCount * 0.85);
+
     const nextOrig = i + 1 < originalCues.length ? originalCues[i + 1] : null;
     const nextAligned = nextOrig ? alignedMap.get(String(nextOrig.id)) : undefined;
     const nextCueBound = nextOrig
@@ -318,6 +372,46 @@ function normalizeAlignedCues(
               nextCueBound,
               Math.max(start + 0.45, Math.min(start + origDur, candidateSeg.end + 0.18))
             );
+          }
+        }
+      }
+    }
+
+    // Oversized cue onset detector (handles song intros / low-energy intros like 0.0s -> 16.5s for 7 words)
+    if (waveformPeaks.length > 0 && end - start > expectedMaxSpeechDur + 1.5) {
+      const cuePeaks = waveformPeaks.filter((p) => p.t >= start && p.t <= end);
+      if (cuePeaks.length >= 10) {
+        const leadCutoff = start + Math.min(3.0, (end - start) * 0.3);
+        const leadSlice = cuePeaks.filter((p) => p.t <= leadCutoff);
+        const leadAvg =
+          leadSlice.reduce((acc, p) => acc + p.rms, 0) / Math.max(1, leadSlice.length);
+
+        const bucketStep = Math.max(0.05, (cuePeaks[1]?.t || 0.05) - (cuePeaks[0]?.t || 0));
+        const winLen = Math.min(cuePeaks.length, Math.max(4, Math.round(1.0 / bucketStep)));
+        let maxWinAvg = 0;
+        for (let k = 0; k <= cuePeaks.length - winLen; k++) {
+          let sum = 0;
+          for (let j = 0; j < winLen; j++) sum += cuePeaks[k + j].rms;
+          const avg = sum / winLen;
+          if (avg > maxWinAvg) maxWinAvg = avg;
+        }
+
+        if (maxWinAvg >= Math.max(20, leadAvg * 1.45)) {
+          const onsetThreshold = Math.max(leadAvg * 1.4, maxWinAvg * 0.46);
+          const minKeepTail = Math.max(1.2, Math.min(expectedMaxSpeechDur * 0.7, wordsCount * 0.35));
+          const latestAllowedStart = Math.max(start, end - minKeepTail);
+
+          for (let k = 0; k < cuePeaks.length - 1; k++) {
+            if (cuePeaks[k].t > latestAllowedStart) break;
+            if (
+              cuePeaks[k].rms >= onsetThreshold &&
+              cuePeaks[k + 1].rms >= onsetThreshold * 0.85
+            ) {
+              if (cuePeaks[k].t - start > 0.5) {
+                start = Math.max(prevEnd, cuePeaks[k].t - 0.1);
+              }
+              break;
+            }
           }
         }
       }
@@ -379,8 +473,9 @@ export async function runAutoAlignSubtitles(options: {
     onProgress?.(30, 'Reutilizando pista de audio decodificada...');
   }
 
-  onProgress?.(48, 'Detectando silencios y comienzos reales de voz...');
-  const analysis = analyzeWaveformPeaks(audioBuffer);
+  onProgress?.(42, 'Aislando frecuencias vocales y detectando inicios de voz...');
+  const vocalBuffer = await conditionVocalBuffer(audioBuffer);
+  const analysis = analyzeWaveformPeaks(vocalBuffer);
   const actualDuration = analysis.duration > 0 ? analysis.duration : duration;
 
   if (analysis.waveformPeaks.length === 0) {
@@ -460,7 +555,8 @@ export async function runAutoAlignSubtitles(options: {
     alignedMap,
     actualDuration,
     analysis.speechSegments,
-    analysis.silenceRegions
+    analysis.silenceRegions,
+    analysis.waveformPeaks
   );
 
   let adjustedCount = 0;

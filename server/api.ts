@@ -549,13 +549,17 @@ apiRouter.post('/auto-align', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Audio waveform peaks are required for alignment.' });
     }
 
-    const compactCues = subtitles.map((c) => ({
-      id: String(c.id),
-      start: Number(c.start.toFixed(2)),
-      end: Number(c.end.toFixed(2)),
-      words: (c.text || '').trim().split(/\s+/).filter(Boolean).length,
-      text: (c.text || '').slice(0, 120),
-    }));
+    const compactCues = subtitles.map((c) => {
+      const words = (c.text || '').trim().split(/\s+/).filter(Boolean).length;
+      return {
+        id: String(c.id),
+        start: Number(c.start.toFixed(2)),
+        end: Number(c.end.toFixed(2)),
+        words,
+        expectedSec: Number(Math.max(1.2, words * 0.72).toFixed(1)),
+        text: (c.text || '').slice(0, 120),
+      };
+    });
 
     const compactPeaks = waveformPeaks.map((p) => [
       Number(p.t.toFixed(2)),
@@ -577,7 +581,7 @@ apiRouter.post('/auto-align', async (req: Request, res: Response) => {
     }));
 
     const prompt = `You are an expert audiovisual subtitle timing engineer specializing in Voice Activity Detection (VAD) and silence removal.
-Your task is to synchronize existing subtitle cues strictly to the real spoken audio, eliminating silent intros and silent gaps where no voice exists.
+Your task is to synchronize existing subtitle cues strictly to the real spoken or sung voice, eliminating silent intros, musical intros, and silent gaps where no voice exists.
 
 Project language: ${language}
 Total audio duration: ${Number(duration || 60).toFixed(2)} seconds.
@@ -595,14 +599,14 @@ Existing subtitle cues to align (keep the exact same "id" values in the exact sa
 ${JSON.stringify(compactCues)}
 
 Strict Alignment Rules:
-1. NEVER place or start a subtitle inside a NO-VOICE / SILENCE ZONE! For example, if there is 5 seconds of silence from 0.00 to 5.00 before voice starts at 5.00, the subtitle MUST NOT start at 0.00 — move "start" forward to 5.00 where the voice actually begins!
-2. Match each subtitle cue to the corresponding ACTIVE VOICE SEGMENT in chronological order. Snap "start" tightly to the exact voice onset where energy rises, and snap "end" right after speech ends (max 0.15s tail) before any silence gap.
-3. If an input cue currently covers silence followed by speech (e.g. start=0.00, end=8.00 when silence is 0..5 and speech is 5..8), TRIM the silent beginning so the cue becomes start=5.00, end=8.00.
+1. NEVER place or start a subtitle inside a NO-VOICE / SILENCE ZONE! For example, if there is silence or quiet intro from 0.00 to 12.50 before voice starts at 12.50, the subtitle MUST NOT start at 0.00 — move "start" forward to 12.50 where the voice actually begins!
+2. MUSIC / INSTRUMENTAL INTRO RULE: In songs or videos with music intros, cue #1 or cues after instrumental breaks often span far too long (e.g. start=0.00, end=16.50 when "words"=7 and "expectedSec"=5.0). That means the voice only enters near the end of that span! Inspect "waveformPeaks" inside [start, end] and move "start" forward to where the strong vocal energy surge begins (so duration is closer to expectedSec and never starts over quiet intro music).
+3. Match each subtitle cue to the corresponding ACTIVE VOICE SEGMENT in chronological order. Snap "start" tightly to the exact voice onset where energy rises, and snap "end" right after speech ends (max 0.15s tail) before any silence gap.
 4. When multiple consecutive cues fall inside one continuous active voice segment, distribute their durations proportionally to their word count ("words") and natural speaking pace, anchored to local waveform peaks inside that segment.
 5. Keep strict chronological order with zero overlaps: cue[i].start < cue[i].end <= cue[i+1].start <= ${Number(duration || 60).toFixed(2)}.
 6. Minimum cue duration is 0.40s unless the surrounding speech gap is smaller.
 7. Never drop, reorder, or merge cues — return exactly one aligned timing object for every input cue "id".
-8. Provide a concise 1-sentence "summary" in Spanish describing how cues were aligned to voice onsets and trimmed from silence.`;
+8. Provide a concise 1-sentence "summary" in Spanish describing how cues were aligned to voice onsets and trimmed from silence or music intros.`;
 
     const alignSchema = {
       type: Type.OBJECT,
